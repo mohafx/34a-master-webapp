@@ -1,0 +1,199 @@
+import { useState, useEffect, useRef } from 'react';
+import { EmbeddedCheckoutProvider, EmbeddedCheckout } from '@stripe/react-stripe-js';
+import { loadStripe, Stripe } from '@stripe/stripe-js';
+import { Loader2, AlertTriangle } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+
+interface EmbeddedPaymentProps {
+    clientSecret: string;
+    onComplete?: () => void;
+}
+
+export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentProps) => {
+    const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+    const onCompleteCalledRef = useRef(false);
+    const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const initialSubscriptionCheckedRef = useRef(false);
+    const hadSubscriptionOnMountRef = useRef(false);
+
+    useEffect(() => {
+        const sessionId = clientSecret.split('_secret_')[0];
+        console.log('[EmbeddedPayment] Mounted, session:', sessionId);
+
+        const key = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+
+        if (!key) {
+            setError("Stripe ist nicht konfiguriert. Bitte kontaktiere den Support.");
+            setLoading(false);
+            return;
+        }
+
+        // IMPORTANT: Check if user already has a subscription BEFORE we start polling
+        // This prevents false positives when user cancels Klarna and returns
+        const checkInitialSubscription = async () => {
+            try {
+                const { data } = await supabase.functions.invoke('sync-subscription');
+                hadSubscriptionOnMountRef.current = data?.restored === true;
+                initialSubscriptionCheckedRef.current = true;
+                console.log('[EmbeddedPayment] Initial subscription check:', hadSubscriptionOnMountRef.current);
+            } catch (err) {
+                console.error('[EmbeddedPayment] Initial check failed:', err);
+                initialSubscriptionCheckedRef.current = true;
+            }
+        };
+        checkInitialSubscription();
+
+        try {
+            const promise = loadStripe(key);
+            setStripePromise(promise);
+
+            promise.then((stripe) => {
+                if (!stripe) {
+                    setError("Stripe konnte nicht geladen werden.");
+                }
+                setLoading(false);
+            }).catch((err) => {
+                console.error("Stripe load error:", err);
+                setError("Stripe konnte nicht geladen werden.");
+                setLoading(false);
+            });
+        } catch (err) {
+            console.error("Stripe init error:", err);
+            setError("Stripe konnte nicht initialisiert werden.");
+            setLoading(false);
+        }
+
+        // Cleanup on unmount
+        return () => {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+            }
+        };
+    }, []);
+
+    // FALLBACK: Poll for payment completion with exponential backoff
+    // CRITICAL: Only trigger success if subscription state CHANGED from false to true
+    // Changed from 2s interval x 60 to exponential backoff: 3s, 5s, 8s, 12s, 18s (5 attempts max)
+    useEffect(() => {
+        if (loading) return;
+
+        let pollCount = 0;
+        const maxPolls = 5; // Reduced from 60 - webhook should arrive within ~20s usually
+        const backoffDelays = [3000, 5000, 8000, 12000, 18000]; // Exponential backoff
+
+        const checkPaymentStatus = async () => {
+            // Wait until initial check is complete
+            if (!initialSubscriptionCheckedRef.current) {
+                schedulNextPoll();
+                return;
+            }
+
+            pollCount++;
+            console.log(`[EmbeddedPayment] Polling attempt ${pollCount}/${maxPolls}`);
+
+            try {
+                const { data } = await supabase.functions.invoke('sync-subscription');
+                const hasSubscriptionNow = data?.restored === true;
+
+                // SUCCESS CONDITION: User did NOT have subscription on mount, but NOW has one
+                if (hasSubscriptionNow && !hadSubscriptionOnMountRef.current && !onCompleteCalledRef.current) {
+                    console.log('[EmbeddedPayment] NEW subscription detected via polling');
+                    onCompleteCalledRef.current = true;
+
+                    setTimeout(() => {
+                        if (onComplete) {
+                            onComplete();
+                        }
+                    }, 500);
+                    return; // Stop polling
+                }
+            } catch (err) {
+                console.error('[EmbeddedPayment] Polling error:', err);
+            }
+
+            // Schedule next poll if not at max
+            if (pollCount < maxPolls) {
+                schedulNextPoll();
+            } else {
+                console.log('[EmbeddedPayment] Max polls reached, stopping');
+            }
+        };
+
+        const schedulNextPoll = () => {
+            const delay = backoffDelays[Math.min(pollCount, backoffDelays.length - 1)];
+            pollingIntervalRef.current = setTimeout(checkPaymentStatus, delay);
+        };
+
+        // Start first poll after 3s delay
+        const startDelay = setTimeout(checkPaymentStatus, 3000);
+
+        return () => {
+            clearTimeout(startDelay);
+            if (pollingIntervalRef.current) {
+                clearTimeout(pollingIntervalRef.current);
+            }
+        };
+    }, [loading, onComplete]);
+
+    const handleStripeComplete = () => {
+        if (onCompleteCalledRef.current) {
+            return; // Already called via polling
+        }
+
+        console.log('[EmbeddedPayment] Stripe onComplete callback fired');
+        onCompleteCalledRef.current = true;
+
+        // Stop polling since we got the callback
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+        }
+
+        // Small delay to show Stripe's success animation
+        setTimeout(() => {
+            if (onComplete) {
+                onComplete();
+            }
+        }, 1500);
+    };
+
+    if (error) {
+        return (
+            <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
+                <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-4">
+                    <AlertTriangle className="text-red-500" size={24} />
+                </div>
+                <p className="text-red-600 dark:text-red-400 font-medium mb-2">{error}</p>
+                <p className="text-sm text-slate-500">
+                    Bitte versuche es später erneut oder kontaktiere uns über WhatsApp.
+                </p>
+            </div>
+        );
+    }
+
+    if (loading || !stripePromise) {
+        return (
+            <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="w-10 h-10 text-amber-500 animate-spin mb-4" />
+                <p className="text-slate-600 dark:text-slate-400 font-medium">Zahlung wird vorbereitet...</p>
+            </div>
+        );
+    }
+
+    return (
+        <div id="checkout" className="w-full min-h-[400px]">
+            <EmbeddedCheckoutProvider
+                stripe={stripePromise}
+                options={{
+                    clientSecret,
+                    onComplete: handleStripeComplete
+                }}
+            >
+                <EmbeddedCheckout className="h-full" />
+            </EmbeddedCheckoutProvider>
+        </div>
+    );
+};
+
+

@@ -1,0 +1,91 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# TypeScript v1 declaration files
+typings/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Optional microbundle cache
+.cache
+.parcel-cache
+
+# Optional next.js build output
+.next
+_next
+
+# Nuxt.js build setup
+.nuxt
+dist
+
+# Vite build output
+dist
+dist-ssr
+*.local
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# Tern namespaced files
+.tern-port
+
+# Temporary files
+tmp/
+.tmp/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Production
+build/
+
+# Supabase
+supabase/.temp/
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.development
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local cleanup archive
+local_archive/

@@ -1,0 +1,22 @@
+{
+    "name": "34a Master - IHK Sachkunde Trainer",
+    "short_name": "34a Master",
+    "description": "Die ultimative Lern-App für die IHK Sachkundeprüfung §34a GewO",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#F2F4F6",
+    "theme_color": "#0f172a",
+    "orientation": "portrait",
+    "categories": [
+        "education",
+        "productivity"
+    ],
+    "icons": [
+        {
+            "src": "/logo.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}
