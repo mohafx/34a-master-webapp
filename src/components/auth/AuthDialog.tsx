@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApp } from '../../App';
+import { usePostHog } from '../../contexts/PostHogProvider';
 import { LogIn, Mail, Lock, X, User, CheckCircle, Languages, KeyRound, ChevronDown, Check, Chrome } from 'lucide-react';
 import { detectInAppBrowser } from '../../utils/inAppBrowser';
 import { InAppBrowserWarning } from './InAppBrowserWarning';
@@ -80,6 +81,7 @@ const GoogleIcon = () => (
 export function AuthDialog({ onClose, initialMode = 'register', message }: AuthDialogProps) {
     const { signIn, signUp, signInWithGoogle, resetPassword } = useAuth();
     const { language, toggleLanguage, showLanguageToggle } = useApp();
+    const { trackEvent } = usePostHog();
     const showArabic = language === 'DE_AR';
 
     const [mode, setMode] = useState<'login' | 'register' | 'forgotPassword'>(initialMode);
@@ -156,6 +158,7 @@ export function AuthDialog({ onClose, initialMode = 'register', message }: AuthD
                     return;
                 }
                 await signUp(email, password, displayName);
+                trackEvent('user_signed_up', { method: 'email' });
                 setRegistrationSuccess(true);
             } else if (mode === 'forgotPassword') {
                 if (!email) {

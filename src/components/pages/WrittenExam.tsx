@@ -154,6 +154,15 @@ export default function WrittenExam() {
       // Calculate score
       const score = calculateScore(questions, userAnswers);
 
+      // Track exam completion
+      trackEvent('written_exam_completed', {
+        total_questions: questions.length,
+        answered_count: Object.keys(userAnswers).length,
+        score_percent: score.percentage,
+        passed: score.passed,
+        duration_seconds: Math.round((Date.now() - examStartTime) / 1000),
+      });
+
       // Complete session
       if (authUser) {
         // Logged in: save to database

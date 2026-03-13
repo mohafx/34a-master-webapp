@@ -31,6 +31,14 @@ export default defineConfig(({ mode, command }) => {
   return {
     server: {
       port: process.env.PORT ? parseInt(process.env.PORT) : 3000,
+      // PostHog Reverse Proxy: umgeht Ad-Blocker in der Entwicklung
+      proxy: {
+        '/ingest': {
+          target: 'https://eu.i.posthog.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/ingest/, ''),
+        },
+      },
     },
     plugins: [react()],
     define: {

@@ -4,7 +4,8 @@ import { hasAnalyticsConsent, getStoredConsent } from '../components/CookieConse
 
 // PostHog Configuration
 const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY || '';
-const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST || 'https://eu.posthog.com';
+// Proxy über eigene Domain (/ingest) um Ad-Blocker zu umgehen
+const POSTHOG_HOST = import.meta.env.VITE_POSTHOG_HOST || '/ingest';
 
 // Type-safe Event Names
 export type AnalyticsEventName =
@@ -24,6 +25,8 @@ export type AnalyticsEventName =
     // Exam Events
     | 'written_exam_started'
     | 'written_exam_completed'
+    | 'mini_exam_started'
+    | 'mini_exam_completed'
     // Premium Events
     | 'paywall_shown'
     | 'upgrade_clicked'
@@ -151,6 +154,7 @@ export function PostHogProvider({ children }: { children: ReactNode }) {
         try {
             posthog.init(POSTHOG_KEY, {
                 api_host: POSTHOG_HOST,
+                ui_host: 'https://eu.posthog.com', // PostHog UI/Toolbar verwendet echte Domain
                 // Privacy settings
                 autocapture: false, // Manual tracking only
                 capture_pageview: false, // We'll track page views manually

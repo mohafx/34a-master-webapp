@@ -6,7 +6,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataCacheProvider, useDataCache } from './contexts/DataCacheContext';
 import { SubscriptionProvider, useSubscription } from './contexts/SubscriptionContext';
 import { ToastProvider, toast } from './contexts/ToastContext';
-import { PostHogProvider, usePostHog } from './contexts/PostHogProvider';
+import { PostHogProvider, usePostHog, usePageTracking } from './contexts/PostHogProvider';
 import { PaywallDialog } from './components/PaywallDialog';
 import { db, guestStorage } from './services/database';
 import { supabase } from './lib/supabase';
@@ -138,6 +138,7 @@ function AppContent() {
   const { user: authUser, loading: authLoading, signOut } = useAuth();
   const { loading: dataLoading, loadingStatus, error: loadingError, refreshData } = useDataCache();
   const { trackEvent, identifyUser, resetUser, setUserProperties } = usePostHog();
+  usePageTracking(); // Track page views on hash navigation (SPA)
   const [language, setLanguage] = useState<AppLanguage>(AppLanguage.DE);
   const [settings, setSettings] = useState<UserSettings>(() => {
     // Initialize from localStorage to avoid flash of default content
@@ -665,6 +666,17 @@ function AppContent() {
           if (authUser) {
             localStorage.setItem(`34a_onboarding_completed_${authUser.id}`, 'true');
           }
+
+          // Track onboarding completion
+          trackEvent('onboarding_completed', {
+            has_exam_date: !!data.examDate,
+            language: data.language,
+            newsletter_opted_in: data.newsletter,
+            days_until_exam: data.examDate
+              ? Math.ceil((new Date(data.examDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+              : null,
+          });
+
           setShowFirstTimeOnboarding(false);
         }}
       />
