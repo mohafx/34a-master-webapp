@@ -384,7 +384,14 @@ function AppContent() {
 
     if (authUser) {
       // Owner-Emails → als interner Nutzer markieren (aus Analytics herausfiltern)
-      const OWNER_EMAILS = ['m.almajzoub1@gmail.com', '34a.master@gmail.com'];
+      const OWNER_EMAILS = [
+        'm.almajzoub1@gmail.com',
+        '34a.master@gmail.com',
+        'mofx99@gmail.com',
+        'xxjjj08@gmail.com',
+        'm7md0majzoup@gmail.com',
+        'tiktokfitness75@gmail.com',
+      ];
       const isOwner = OWNER_EMAILS.includes(authUser.email ?? '');
 
       // Identify user in PostHog
