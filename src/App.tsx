@@ -383,11 +383,16 @@ function AppContent() {
     if (authLoading) return;
 
     if (authUser) {
+      // Owner-Emails → als interner Nutzer markieren (aus Analytics herausfiltern)
+      const OWNER_EMAILS = ['m.almajzoub1@gmail.com', '34a.master@gmail.com'];
+      const isOwner = OWNER_EMAILS.includes(authUser.email ?? '');
+
       // Identify user in PostHog
       identifyUser(authUser.id, {
         email: authUser.email,
         created_at: authUser.created_at,
-        is_premium: isPremium
+        is_premium: isPremium,
+        ...(isOwner && { is_internal: true, is_owner: true }),
       });
       trackEvent('user_logged_in', { method: 'session_restore' });
 
