@@ -138,9 +138,14 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
       setAllQuestions(cached.questions);
       setQuestions(cached.questions);
       setAllFlashcards(cached.flashcards);
-      setLoadingStatus('Aus Cache geladen');
+      const status = authLoading ? 'Benutzer wird angemeldet...' : 'Daten werden geladen...';
+      console.log('[DEBUG] App loading state:', { authLoading, dataLoading: loading, subscriptionLoading, dataError: error });
       setLoading(false);
-      console.log(`⚡ [DataCache] Cache loaded in ${Date.now() - startTime}ms`);
+      console.log(`⚡ [DataCache] Cache loaded in ${Date.now() - startTime}ms`, { 
+        modules: cached.modules?.length, 
+        questions: cached.questions?.length, 
+        flashcards: cached.flashcards?.length 
+      });
 
       // 2. Refresh in background (don't wait)
       refreshFromNetwork(true).catch(err => console.warn('Background refresh failed:', err));
@@ -159,15 +164,25 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
       setError(null);
       setLoadingStatus('Lade Daten...');
 
-      // PARALLEL loading - everything at the same time!
-      console.log('🌐 [DataCache] Loading modules + questions + flashcards in parallel...');
-      const [modulesData, questionsData, previewData, flashcardsData, previewFlashcards] = await Promise.all([
-        db.getModules(),
-        db.getAllQuestions(),
-        db.getQuestionsPreview(),
-        db.getAllFlashcards(),
-        db.getFlashcardsPreview()
-      ]);
+      const TIMEOUT_MS = 60000;
+      const withTimeout = <T,>(promise: Promise<T>): Promise<T> =>
+        Promise.race([
+          promise,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error('Datenbank-Timeout nach 60 Sekunden')), TIMEOUT_MS)
+          )
+        ]);
+
+      console.log('🌐 [DataCache] Loading data in parallel...');
+      const [modulesData, questionsData, previewData, flashcardsData, previewFlashcards] = await withTimeout(
+        Promise.all([
+          db.getModules(),
+          db.getAllQuestions(),
+          db.getQuestionsPreview(),
+          db.getAllFlashcards(),
+          db.getFlashcardsPreview()
+        ])
+      );
 
       console.log(`✅ [DataCache] Parallel load complete in ${Date.now() - startTime}ms`);
       console.log(`   Modules: ${modulesData.length}, Full Questions: ${questionsData.length}, Preview Questions: ${previewData.length}`);

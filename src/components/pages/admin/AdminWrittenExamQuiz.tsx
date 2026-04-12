@@ -8,6 +8,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { runQualityAnalysis, QualityAnalysisResult, OptimizedQuestion, runArabicTranslation, ArabicTranslationResult } from '../../../services/gemini';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { isAdminEmail } from '../../../utils/userRoles';
 
 const ANSWER_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
 
@@ -37,7 +38,7 @@ export default function AdminWrittenExamQuiz() {
     const decodedTopic = topic ? decodeURIComponent(topic) : null;
     const isAllQuestions = topic === 'all';
     const { user: authUser } = useAuth();
-    const isAdmin = authUser?.email === 'm.almajzoub1@gmail.com';
+    const isAdmin = isAdminEmail(authUser?.email);
 
     const [loading, setLoading] = useState(true);
     const [questions, setQuestions] = useState<WrittenQuestion[]>([]);

@@ -5,9 +5,9 @@ import { useDataCache } from '../../contexts/DataCacheContext';
 import { ArrowLeft, BarChart3, TrendingUp, CheckCircle2, XCircle, BookOpen, Languages, Calendar, UserPlus, ChevronLeft, ChevronRight, RotateCw, ChevronDown } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { db } from '../../services/database';
-import { supabase } from '../../lib/supabase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
+import { getCompletedLessonCountForModule } from '../../services/lessonFlow';
 
 // Type for daily activity data
 interface DailyActivity {
@@ -30,8 +30,6 @@ export default function Statistics() {
     const { language, progress, toggleLanguage, showLanguageToggle, openAuthDialog } = useApp();
     const { modules, questions } = useDataCache();
     const { user: authUser } = useAuth();
-    const [completedLessonIds, setCompletedLessonIds] = useState<string[]>([]);
-    const [totalLessonsCountFromDB, setTotalLessonsCountFromDB] = useState(0);
     const [dailyActivity, setDailyActivity] = useState<DailyActivity[]>([]);
     const [isLoadingActivity, setIsLoadingActivity] = useState(true);
     const [weekIndex, setWeekIndex] = useState(0); // 0 = first week (oldest)
@@ -39,35 +37,6 @@ export default function Statistics() {
     const [lessonsExpanded, setLessonsExpanded] = useState(false);
 
     const isLoggedIn = !!authUser;
-
-    // Fetch total lessons count and completed lessons
-    useEffect(() => {
-        const fetchStats = async () => {
-            // 1. Fetch total lessons count
-            try {
-                const { count } = await supabase.from('lessons').select('*', { count: 'exact', head: true });
-                if (count !== null) setTotalLessonsCountFromDB(count);
-            } catch (e) {
-                console.error("Error fetching total lessons count:", e);
-            }
-
-            // 2. Fetch completed lessons
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                try {
-                    const completed = await db.getCompletedLessons(user.id);
-                    setCompletedLessonIds(completed);
-                } catch (e) {
-                    console.error("Error fetching completed lessons:", e);
-                }
-            } else {
-                // Guest - use localStorage
-                const completed = JSON.parse(localStorage.getItem('guest_completed_lessons') || '[]');
-                setCompletedLessonIds(completed);
-            }
-        };
-        fetchStats();
-    }, []);
 
     // Fetch daily activity for charts (registered users only)
     useEffect(() => {
@@ -145,11 +114,8 @@ export default function Statistics() {
         for (const mod of modules) {
             const moduleLessons = mod.lessons || [];
             totalLessonsCount += moduleLessons.length;
-            completedLessonsCount += moduleLessons.filter(l => completedLessonIds.includes(l.id)).length;
+            completedLessonsCount += getCompletedLessonCountForModule(mod.id, modules, questions, progress);
         }
-
-        // Use totalLessonsCountFromDB if modules don't have lessons populated
-        const finalTotalLessonsCount = totalLessonsCount === 0 ? totalLessonsCountFromDB : totalLessonsCount;
 
         // Flashcard Stats
         const totalFlashcards = allFlashcards.length;
@@ -161,15 +127,15 @@ export default function Statistics() {
             answeredQuestions,
             correctAnswers,
             wrongAnswers,
-            totalLessons: finalTotalLessonsCount,
+            totalLessons: totalLessonsCount,
             completedLessons: completedLessonsCount,
             totalFlashcards,
             correctFlashcards,
             flashcardProgressPercent,
             practiceProgress: totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0,
-            learnProgress: finalTotalLessonsCount > 0 ? Math.round((completedLessonsCount / finalTotalLessonsCount) * 100) : 0,
+            learnProgress: totalLessonsCount > 0 ? Math.round((completedLessonsCount / totalLessonsCount) * 100) : 0,
         };
-    }, [questions, progress, modules, completedLessonIds, totalLessonsCountFromDB, allFlashcards, flashcardProgress]);
+    }, [questions, progress, modules, allFlashcards, flashcardProgress]);
 
     // Calculate per-module statistics
     const moduleStats = useMemo(() => {
@@ -206,9 +172,9 @@ export default function Statistics() {
                 practiceProgress: totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0,
                 // Lesson stats
                 totalLessons: module.lessons ? module.lessons.length : 0,
-                completedLessons: module.lessons ? module.lessons.filter(l => completedLessonIds.includes(l.id)).length : 0,
+                completedLessons: getCompletedLessonCountForModule(module.id, modules, questions, progress),
                 learnProgress: (module.lessons && module.lessons.length > 0)
-                    ? Math.round((module.lessons.filter(l => completedLessonIds.includes(l.id)).length / module.lessons.length) * 100)
+                    ? Math.round((getCompletedLessonCountForModule(module.id, modules, questions, progress) / module.lessons.length) * 100)
                     : 0,
                 // Flashcard stats
                 totalFlashcards,
@@ -217,7 +183,7 @@ export default function Statistics() {
                 flashcardProgress: totalFlashcards > 0 ? Math.round((correctFlashcards / totalFlashcards) * 100) : 0,
             };
         }).filter(m => m.totalQuestions > 0 || m.totalLessons > 0 || m.totalFlashcards > 0);
-    }, [modules, questions, progress.answeredQuestions, completedLessonIds, allFlashcards, flashcardProgress]);
+    }, [modules, questions, progress, allFlashcards, flashcardProgress]);
 
     // Format date for chart display
     const formatDate = (dateStr: string) => {

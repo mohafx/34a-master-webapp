@@ -1,6 +1,9 @@
 # Logs
 logs
 *.log
+*_log.txt
+server_log.txt
+error_check.txt
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -55,6 +58,11 @@ dist-ssr
 # Temporary files
 tmp/
 .tmp/
+tmp*.json
+tmp*.cjs
+package/
+testsprite-mcp.tgz
+testsprite_tests/tmp/
 
 # OS generated files
 .DS_Store

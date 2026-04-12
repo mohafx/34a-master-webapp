@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
+import { useDevPanel } from '../devpanel/DevPanelContext';
 
 interface AuthContextType {
     user: User | null;
@@ -15,16 +16,36 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+    const { isOverrideActive, overrideState, simulatedUser, clearOverrideState } = useDevPanel();
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (isOverrideActive) {
+            setUser(overrideState === 'guest' ? null : simulatedUser);
+            setLoading(false);
+            return;
+        }
+
         let isMounted = true;
 
         // Timeout to prevent infinite loading
         const timeoutPromise = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Auth check timeout')), 10000);
         });
+
+        // Test Mode Detection
+        const isTestMode = window.location.search.includes('testsprite=true') || localStorage.getItem('testsprite_mode') === 'true';
+        if (isTestMode) {
+            console.log('🧪 [Auth] TEST MODE ACTIVE');
+            setUser({
+                id: '00000000-0000-0000-0000-000000000000',
+                email: 'test@testsprite.com',
+                user_metadata: { display_name: 'TestSprite' }
+            } as any);
+            setLoading(false);
+            return;
+        }
 
         // Get current session with race against timeout
         Promise.race([
@@ -76,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isMounted = false;
             subscription.unsubscribe();
         };
-    }, []);
+    }, [isOverrideActive, overrideState, simulatedUser]);
 
     const signUp = async (email: string, password: string, displayName: string) => {
         const { data, error } = await supabase.auth.signUp({
@@ -129,6 +150,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const signOut = async () => {
+        if (isOverrideActive) {
+            clearOverrideState();
+            setUser(null);
+            return;
+        }
+
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
     };
@@ -144,7 +171,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, loading, signUp, signIn, signInWithGoogle, signOut, resetPassword }}>
+        <AuthContext.Provider value={{
+            user,
+            loading,
+            signUp,
+            signIn,
+            signInWithGoogle,
+            signOut,
+            resetPassword
+        }}>
             {children}
         </AuthContext.Provider>
     );

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../../App';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDataCache } from '../../contexts/DataCacheContext';
@@ -17,6 +17,14 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { GuestProgressPopup } from '../ui/GuestProgressPopup';
 import { AuthDialog } from '../auth/AuthDialog';
+import { isAdminEmail } from '../../utils/userRoles';
+import {
+  compareQuestions,
+  getLessonQuestionProgress,
+  getNextLessonForModule,
+  getOrderedLessonsForModule,
+  getLessonQuestions,
+} from '../../services/lessonFlow';
 
 interface QuestionResult {
   question: Question;
@@ -30,9 +38,10 @@ const ANSWER_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
 export default function QuestionView() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user, language, answerQuestion, toggleBookmark, progress, settings, isPremium, openPaywall, toggleLanguage } = useApp();
+  const location = useLocation();
+  const { user, language, answerQuestion, toggleBookmark, progress, settings, isPremium, openPaywall, toggleLanguage, setLessonCompletion } = useApp();
   const { user: authUser } = useAuth();
-  const isAdmin = authUser?.email === 'm.almajzoub1@gmail.com';
+  const isAdmin = isAdminEmail(authUser?.email);
   const { trackEvent } = usePostHog();
   const [quizStartTime] = useState(Date.now());
 
@@ -97,8 +106,11 @@ export default function QuestionView() {
   const mode = searchParams.get('mode'); // 'random' | 'exam' | 'module-test' | 'mini-exam'
   const moduleId = searchParams.get('module');
   const singleId = searchParams.get('single');
+  const lessonId = searchParams.get('lesson');
+  const startQuestionId = searchParams.get('start');
   const wrongIds = searchParams.get('wrongIds'); // Comma-separated list of wrong question IDs
   const fromBookmarks = searchParams.get('from') === 'bookmarks';
+  const isLessonMode = mode === 'lesson' && !!moduleId && !!lessonId;
 
   // Mini-exam specific URL params
   const miniExamQuestionCount = parseInt(searchParams.get('questionCount') || '10', 10);
@@ -106,12 +118,13 @@ export default function QuestionView() {
   const isMiniExam = mode === 'mini-exam';
 
   // Get modules from DataCache to determine first lesson
-  const { modules: cachedModules, getQuestionsByModule, getAccessibleQuestions } = useDataCache();
+  const { modules: cachedModules, getQuestionsByModule } = useDataCache();
 
-  // Helper to check if a question is accessible for free users
+  // Helper to check if a question is accessible
   const isQuestionAccessible = useCallback((question: Question): boolean => {
-    return true; // All questions are now accessible for free users
-  }, []);
+    if (isPremium) return true;
+    return question.isFree === true;
+  }, [isPremium]);
 
   // State
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
@@ -174,6 +187,16 @@ export default function QuestionView() {
   // Total questions count from database
   const [totalQuestionsCount, setTotalQuestionsCount] = useState<number>(0);
 
+  const lessonMeta = useMemo(() => {
+    if (!isLessonMode || !moduleId || !lessonId) return null;
+    return getOrderedLessonsForModule(moduleId, cachedModules).find(lesson => lesson.id === lessonId) || null;
+  }, [isLessonMode, moduleId, lessonId, cachedModules]);
+
+  const nextLesson = useMemo(() => {
+    if (!isLessonMode || !moduleId || !lessonId) return null;
+    return getNextLessonForModule(moduleId, lessonId, cachedModules);
+  }, [isLessonMode, moduleId, lessonId, cachedModules]);
+
 
 
   // Reset states when mode/module changes
@@ -202,7 +225,7 @@ export default function QuestionView() {
         module_id: moduleId || undefined
       });
     }
-  }, [mode, moduleId, singleId, miniExamTimeLimit]);
+  }, [mode, moduleId, singleId, lessonId, startQuestionId, miniExamTimeLimit]);
 
   // Load total questions count
   useEffect(() => {
@@ -244,7 +267,9 @@ export default function QuestionView() {
             // Actually, DataCacheContext returns fully mapped Question objects.
             // We just need to apply the sorting/filtering logic.
 
-            let finalQueue = [...cachedQuestions];
+            let finalQueue = isLessonMode && lessonId
+              ? getLessonQuestions(lessonId, cachedQuestions)
+              : [...cachedQuestions];
 
             // Apply caching to module title
             const mod = cachedModules.find(m => m.id === moduleId);
@@ -259,7 +284,9 @@ export default function QuestionView() {
             }
 
             // SORTING LOGIC (Mirrored from below)
-            if (!mode) {
+            if (isLessonMode) {
+              finalQueue = [...finalQueue].sort(compareQuestions);
+            } else if (!mode) {
               finalQueue = [...finalQueue].sort((a, b) => {
                 // First sort by Lesson Order (we need to resolve lesson order from cached modules if not on question)
                 // The cached questions might not have lessonOrder property directly if not enriched.
@@ -290,7 +317,15 @@ export default function QuestionView() {
             // Ensure we have questions, otherwise fallback to DB
             if (finalQueue.length > 0) {
               setQueue(finalQueue);
-              setCurrentIndex(0);
+              if (isLessonMode) {
+                const startIndex = startQuestionId ? finalQueue.findIndex(q => q.id === startQuestionId) : -1;
+                const firstOpenIndex = finalQueue.findIndex(q =>
+                  !Object.prototype.hasOwnProperty.call(progress.answeredQuestions, q.id)
+                );
+                setCurrentIndex(startIndex !== -1 ? startIndex : firstOpenIndex !== -1 ? firstOpenIndex : 0);
+              } else {
+                setCurrentIndex(0);
+              }
               return; // EXIT EARLY - NO NETWORK CALL
             }
           }
@@ -302,7 +337,9 @@ export default function QuestionView() {
           .select('*');
 
 
-        if (singleId) {
+        if (isLessonMode && moduleId && lessonId) {
+          query = query.eq('module_id', moduleId).eq('lesson_id', lessonId);
+        } else if (singleId) {
           // If starting from a single question, we still want to load the context (e.g. the module it belongs to)
           // so the user can continue to the next question in that module.
 
@@ -438,7 +475,9 @@ export default function QuestionView() {
 
         // Sort questions by Lesson Order then global_order_index/orderIndex
         // This matches the sorting in ModuleQuestionsList.tsx (Lesson Grouping)
-        if (!mode && (moduleId || finalQueue.length > 0)) {
+        if (isLessonMode) {
+          finalQueue = [...finalQueue].sort(compareQuestions);
+        } else if (!mode && (moduleId || finalQueue.length > 0)) {
           finalQueue = [...finalQueue].sort((a, b) => {
             // First sort by Lesson Order
             const lessonA = a.lessonOrder ?? 999999;
@@ -493,7 +532,14 @@ export default function QuestionView() {
         setQueue(finalQueue);
 
         // If singleId, set currentIndex to that question
-        if (singleId) {
+        if (isLessonMode) {
+          const startIndex = startQuestionId ? finalQueue.findIndex(q => q.id === startQuestionId) : -1;
+          const firstOpenIndex = finalQueue.findIndex(q =>
+            !Object.prototype.hasOwnProperty.call(progress.answeredQuestions, q.id)
+          );
+
+          setCurrentIndex(startIndex !== -1 ? startIndex : firstOpenIndex !== -1 ? firstOpenIndex : 0);
+        } else if (singleId) {
           const index = finalQueue.findIndex(q => q.id === singleId);
           if (index !== -1) {
             setCurrentIndex(index);
@@ -541,7 +587,7 @@ export default function QuestionView() {
     }
 
     fetchQuestions();
-  }, [mode, moduleId, singleId]);
+  }, [mode, moduleId, singleId, lessonId, startQuestionId]);
 
   const rawQuestion = queue[currentIndex];
   const currentQuestion = rawQuestion ? {
@@ -933,6 +979,14 @@ export default function QuestionView() {
     setIsChecked(true);
     answerQuestion(currentQuestion.id, isCorrect);
 
+    const nextAnsweredQuestions = {
+      ...progress.answeredQuestions,
+      [currentQuestion.id]: isCorrect,
+    };
+    const allLessonQuestionsAnswered = isLessonMode
+      ? queue.every(question => Object.prototype.hasOwnProperty.call(nextAnsweredQuestions, question.id))
+      : false;
+
     // Wenn falsch beantwortet → Erklärung sofort anzeigen
     if (!isCorrect) {
       setShowExplanation(true);
@@ -964,10 +1018,21 @@ export default function QuestionView() {
           setExamFinished(true);
         }
       }, 1500);
+    } else if (isLessonMode && currentIndex >= queue.length - 1 && allLessonQuestionsAnswered) {
+      window.setTimeout(async () => {
+        try {
+          if (lessonId) {
+            await setLessonCompletion(lessonId, true);
+          }
+        } catch (error) {
+          console.error('Error auto-completing lesson:', error);
+        }
+        setExamFinished(true);
+      }, isCorrect ? 450 : 900);
     }
   };
 
-  const executeNextStep = () => {
+  const executeNextStep = async () => {
     if (currentIndex < queue.length - 1) {
       const nextQuestion = queue[currentIndex + 1];
       // Check if next question is accessible
@@ -985,6 +1050,13 @@ export default function QuestionView() {
       setQualityResult(null);
     } else {
       // End of queue reached
+      if (isLessonMode && lessonId) {
+        try {
+          await setLessonCompletion(lessonId, true);
+        } catch (error) {
+          console.error('Error finalizing lesson completion:', error);
+        }
+      }
       setExamFinished(true);
     }
   };
@@ -1004,6 +1076,78 @@ export default function QuestionView() {
       executeNextStep();
     }
   };
+
+  if (examFinished && isLessonMode && moduleId && lessonId) {
+    const lessonProgress = getLessonQuestionProgress(lessonId, queue, progress);
+    const completionPercentage = lessonProgress.total > 0
+      ? Math.round((lessonProgress.answered / lessonProgress.total) * 100)
+      : 0;
+
+    return (
+      <div className="min-h-screen bg-[#F2F4F6] dark:bg-slate-950 px-4 pt-8 pb-24 flex items-center justify-center">
+        <div className="w-full max-w-xl animate-in fade-in zoom-in-95 slide-in-from-bottom-6 duration-500">
+          <Card className="border-none bg-gradient-to-br from-[#3B65F5] via-[#4A73FF] to-[#2551E8] text-white shadow-2xl shadow-blue-500/20 overflow-hidden" padding="lg">
+            <div className="relative">
+              <div className="absolute -top-16 -right-12 w-48 h-48 rounded-full bg-white/10 blur-3xl" />
+              <div className="absolute -bottom-12 -left-10 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
+
+              <div className="relative z-10 text-center pt-14 pb-12">
+                <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-white/15 shadow-inner">
+                  <CheckCircle size={32} className="text-white" strokeWidth={2.5} />
+                </div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/70 mb-2">
+                  {lessonMeta?.titleDE || 'Stark gemacht'}
+                </p>
+                <h1 className="text-3xl font-black tracking-tight mb-10">
+                  Lektion abgeschlossen
+                </h1>
+
+                <div className="mt-8 grid grid-cols-3 gap-3 text-left">
+                  <div className="rounded-2xl bg-white/10 border border-white/10 p-3.5">
+                    <p className="text-[10px] uppercase font-black tracking-[0.16em] text-white/60 mb-1">Beantwortet</p>
+                    <p className="text-xl font-black">{lessonProgress.answered}/{lessonProgress.total}</p>
+                  </div>
+                  <div className="rounded-2xl bg-white/10 border border-white/10 p-3.5">
+                    <p className="text-[10px] uppercase font-black tracking-[0.16em] text-white/60 mb-1">Richtig</p>
+                    <p className="text-xl font-black">{lessonProgress.correct}</p>
+                  </div>
+                  <div className="rounded-2xl bg-white/10 border border-white/10 p-3.5">
+                    <p className="text-[10px] uppercase font-black tracking-[0.16em] text-white/60 mb-1">Fortschritt</p>
+                    <p className="text-xl font-black">{completionPercentage}%</p>
+                  </div>
+                </div>
+
+                <div className="mt-10 space-y-3">
+                  {nextLesson ? (
+                    <Button
+                      fullWidth
+                      size="lg"
+                      variant="secondary"
+                      onClick={() => navigate(`/learn/${moduleId}/lesson/${nextLesson.id}`, { state: location.state })}
+                      rightIcon={<ChevronRight size={20} />}
+                      className="bg-white text-slate-900 hover:bg-white/90"
+                    >
+                      Weiter mit der nächsten Lektion
+                    </Button>
+                  ) : null}
+
+                  <Button
+                    fullWidth
+                    size="lg"
+                    variant="ghost"
+                    onClick={() => navigate('/')}
+                    className="border border-white/20 bg-white/10 text-white hover:bg-white/15"
+                  >
+                    Zurück zum Lernplan
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
   // Mini-Exam Result View with explanations
   if (examFinished && isMiniExam) {
     const passed = (examScore / queue.length) >= 0.5;
@@ -1763,13 +1907,19 @@ export default function QuestionView() {
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => {
-                        // Save current question position for auto-scroll on return
-                        if (queue[currentIndex]) {
-                          sessionStorage.setItem('last_viewed_question_id', queue[currentIndex].id);
-                          sessionStorage.setItem('returning_from_quiz', 'true');
-                        }
-
-                        if (moduleId) {
+                        if (isLessonMode && moduleId && lessonId) {
+                          navigate(`/learn/${moduleId}/lesson/${lessonId}`, {
+                            state: {
+                              ...(location.state as Record<string, unknown> || {}),
+                              scrollToQuestions: true,
+                            },
+                          });
+                        } else if (moduleId) {
+                          // Save current question position for auto-scroll on return
+                          if (queue[currentIndex]) {
+                            sessionStorage.setItem('last_viewed_question_id', queue[currentIndex].id);
+                            sessionStorage.setItem('returning_from_quiz', 'true');
+                          }
                           navigate(`/practice/${moduleId}`);
                         } else if (fromBookmarks) {
                           navigate('/bookmarks');
@@ -1786,11 +1936,17 @@ export default function QuestionView() {
                     <div>
                       {moduleTitle && (
                         <h2 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white leading-tight line-clamp-2">
-                          {moduleTitle.de}
+                          {isLessonMode && lessonMeta?.titleDE ? lessonMeta.titleDE : moduleTitle.de}
                         </h2>
                       )}
                       <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                        {mode === 'module-test' ? 'Wissenstest' : mode === 'exam' ? 'Prüfungssimulation' : 'Übungsmodus'}
+                        {isLessonMode
+                          ? 'Fragen zu dieser Lektion'
+                          : mode === 'module-test'
+                            ? 'Wissenstest'
+                            : mode === 'exam'
+                              ? 'Prüfungssimulation'
+                              : 'Übungsmodus'}
                       </p>
                     </div>
                   </div>
@@ -2831,7 +2987,7 @@ export default function QuestionView() {
                   {!isMiniExam && (() => {
                     // Check if all questions are answered (only relevant when on last question and in module practice mode)
                     const isLastQuestion = currentIndex >= queue.length - 1;
-                    const isModulePracticeMode = moduleId && !mode; // Only check in module practice mode, not in random/exam/module-test
+                    const isModulePracticeMode = isLessonMode || (moduleId && !mode); // Require all answers in lesson flow too
 
                     const allQueueQuestionsAnswered = isModulePracticeMode
                       ? queue.every(q => progress.answeredQuestions.hasOwnProperty(q.id))
@@ -2853,13 +3009,21 @@ export default function QuestionView() {
                               handleNext();
                             } else {
                               // All questions are answered (button is only enabled if so in module mode)
-                              setExamFinished(true);
+                              if (isLessonMode) {
+                                handleNext();
+                              } else {
+                                setExamFinished(true);
+                              }
                             }
                           }}
                           rightIcon={currentIndex < queue.length - 1 ? <ArrowRight size={20} /> : <CheckCircle size={20} />}
                           className={`shadow-lg ${shouldDisable ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
-                          {currentIndex < queue.length - 1 ? 'Weiter' : 'Abschließen'}
+                          {currentIndex < queue.length - 1
+                            ? 'Weiter'
+                            : isLessonMode
+                              ? 'Lektion abschließen'
+                              : 'Abschließen'}
                         </Button>
                         {isLastQuestion && isModulePracticeMode && !allQueueQuestionsAnswered && (
                           <p className="text-xs text-center text-slate-500 dark:text-slate-400 mt-2">

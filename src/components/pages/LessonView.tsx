@@ -4,14 +4,22 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
     ArrowLeft, ChevronLeft, ChevronRight, BookOpen, Languages,
-    Target, Zap, CheckCircle2, Hash, Quote, Info, Star, PlayCircle, Settings
+    Target, Zap, CheckCircle2, Hash, Quote, Info, Star, Settings, Check, Circle, AlertCircle
 } from 'lucide-react';
 import { QuizSettingsDialog } from './QuizSettingsDialog';
 import { useDataCache } from '../../contexts/DataCacheContext';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import { db } from '../../services/database'; // Restored import
-import { supabase } from '../../lib/supabase';
 import { useApp } from '../../App';
+import {
+    buildLessonQuestionPath,
+    findFirstOpenQuestionInLesson,
+    getLessonQuestionProgress,
+    getLessonQuestions,
+    getUnassignedModuleQuestions,
+    isLessonCompleted,
+    isQuestionBasedLesson,
+} from '../../services/lessonFlow';
 
 interface Lesson {
     id: string;
@@ -49,17 +57,47 @@ export default function LessonView() {
     const { moduleId, lessonId } = useParams();
     const navigate = useNavigate();
     const location = useLocation();
-    const { getModuleById } = useDataCache();
+    const { getModuleById, getQuestionsByModule } = useDataCache();
     const { trackEvent } = usePostHog();
-    const [isCompleted, setIsCompleted] = useState(false);
-    const { language, toggleLanguage, showLanguageToggle, isPremium, openPaywall, settings } = useApp();
+    const { language, toggleLanguage, showLanguageToggle, isPremium, openPaywall, settings, setLessonCompletion, progress } = useApp();
 
     const [lessons, setLessons] = useState<Lesson[]>([]);
     const [currentLesson, setCurrentLesson] = useState<Lesson | null>(null);
     const [loading, setLoading] = useState(true);
-    const [hasQuiz, setHasQuiz] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [lessonStartTime] = useState(Date.now());
+    const [checklistState, setChecklistState] = useState<Record<string, boolean>>({});
+    const questionSectionRef = useRef<HTMLDivElement>(null);
+
+    // Load checklist state from localStorage
+    useEffect(() => {
+        if (lessonId) {
+            const saved = localStorage.getItem(`lesson_checklist_${lessonId}`);
+            if (saved) {
+                try {
+                    setChecklistState(JSON.parse(saved));
+                } catch (e) {
+                    console.error("Error loading checklist state:", e);
+                }
+            } else {
+                setChecklistState({}); // Reset for new lesson
+            }
+        }
+    }, [lessonId]);
+
+    // Save checklist state to localStorage
+    const toggleChecklistItem = (itemText: string) => {
+        setChecklistState(prev => {
+            const newState = { ...prev, [itemText]: !prev[itemText] };
+            localStorage.setItem(`lesson_checklist_${lessonId}`, JSON.stringify(newState));
+            trackEvent('checklist_item_toggled', {
+                lesson_id: lessonId,
+                item: itemText,
+                is_checked: newState[itemText]
+            });
+            return newState;
+        });
+    };
 
     // Smart Sticky Header State
     const [showHeader, setShowHeader] = useState(true);
@@ -68,6 +106,10 @@ export default function LessonView() {
 
     const module = moduleId ? getModuleById(moduleId) : null;
     const m = module as any;
+    const moduleQuestions = useMemo(
+        () => (moduleId ? getQuestionsByModule(moduleId) : []),
+        [getQuestionsByModule, moduleId],
+    );
 
     // Track lesson started
     useEffect(() => {
@@ -146,32 +188,37 @@ export default function LessonView() {
         }
     }, [lessons, lessonId, isPremium, moduleId, m]);
 
+    const lessonQuestions = useMemo(
+        () => (currentLesson ? getLessonQuestions(currentLesson.id, moduleQuestions) : []),
+        [currentLesson, moduleQuestions],
+    );
 
-    // Check completion status
+    const questionProgress = useMemo(
+        () => currentLesson
+            ? getLessonQuestionProgress(currentLesson.id, moduleQuestions, progress)
+            : { total: 0, answered: 0, correct: 0, wrong: 0, unanswered: 0, allAnswered: false },
+        [currentLesson, moduleQuestions, progress],
+    );
+
+    const isQuestionLesson = useMemo(
+        () => !!currentLesson && isQuestionBasedLesson(currentLesson.id, moduleQuestions),
+        [currentLesson, moduleQuestions],
+    );
+
+    const isCompleted = useMemo(() => {
+        if (!currentLesson) return false;
+        return isLessonCompleted(currentLesson.id, moduleQuestions, progress);
+    }, [currentLesson, moduleQuestions, progress]);
+
     useEffect(() => {
-        if (!currentLesson) return;
-        setHasQuiz(false);
-
-        const checkCompletion = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-
-            if (user) {
-                // Logged in user - check DB
-                try {
-                    const completedIds = await db.getCompletedLessons(user.id);
-                    setIsCompleted(completedIds.includes(currentLesson.id));
-                } catch (e) {
-                    console.error("Error fetching completion:", e);
-                }
-            } else {
-                // Guest - check local storage
-                const completed = JSON.parse(localStorage.getItem('guest_completed_lessons') || '[]');
-                setIsCompleted(completed.includes(currentLesson.id));
-            }
-        };
-
-        checkCompletion();
-    }, [currentLesson, moduleId, lessonId]);
+        if (!moduleId) return;
+        const orphanQuestions = getUnassignedModuleQuestions(moduleId, moduleQuestions);
+        if (orphanQuestions.length > 0) {
+            console.warn(
+                `[LessonView] ${orphanQuestions.length} Fragen ohne lessonId in Modul ${moduleId} werden im Lektionsfluss ignoriert.`,
+            );
+        }
+    }, [moduleId, moduleQuestions]);
 
     // Handle Deep Linking / Scrolling to Content
     // First tries anchor-based matching, falls back to text-based keyword search
@@ -286,18 +333,6 @@ export default function LessonView() {
         setTimeout(() => attemptScroll(1), 300);
     }, [currentLesson, location.state]);
 
-    // Check if lesson has a quiz
-    useEffect(() => {
-        if (!currentLesson) return;
-
-        db.hasLessonQuiz(currentLesson.id)
-            .then(hasIt => setHasQuiz(hasIt))
-            .catch(err => {
-                console.error("Error checking quiz:", err);
-                setHasQuiz(false);
-            });
-    }, [currentLesson]);
-
     // Font size configuration based on settings
     const lessonFontSizes = {
         large: {
@@ -388,16 +423,79 @@ export default function LessonView() {
                 {children}
             </ol>
         ),
-        li: ({ children }: any) => (
-            <li className="flex items-start gap-2.5 group">
-                <div className="mt-1 flex-shrink-0 text-primary/80 group-hover:text-primary transition-colors">
-                    <CheckCircle2 size={16} />
-                </div>
-                <span className={`${currentFontSize.list} text-slate-700 dark:text-slate-300 leading-relaxed font-medium`}>
-                    {children}
-                </span>
-            </li>
-        ),
+        li: (props: any) => {
+            const { children, checked, index, ordered } = props;
+            
+            // Advanced task detection: check props or children for an input checkbox
+            const hasCheckboxChild = React.Children.toArray(children).some(
+                (child: any) => child?.type === 'input' && child?.props?.type === 'checkbox'
+            );
+            const isTask = checked !== null && checked !== undefined || hasCheckboxChild;
+
+            // Extract text for the state key, while filtering out any input elements
+            const getTextAndFilter = (nodes: any): { text: string; filtered: any } => {
+                const nodesArray = React.Children.toArray(nodes);
+                let text = '';
+                const filtered = nodesArray.filter((node: any) => {
+                    if (node?.type === 'input' && node?.props?.type === 'checkbox') return false;
+                    
+                    const extractText = (n: any): string => {
+                        if (!n) return '';
+                        if (typeof n === 'string') return n;
+                        if (Array.isArray(n)) return n.map(extractText).join('');
+                        if (n.props?.children) return extractText(n.props.children);
+                        return '';
+                    };
+                    text += extractText(node);
+                    return true;
+                });
+                return { text: text.trim(), filtered };
+            };
+
+            const { text: textContent, filtered: filteredChildren } = getTextAndFilter(children);
+            const isChecked = isTask ? (checklistState[textContent] ?? (checked || false)) : false;
+
+            if (isTask) {
+                return (
+                    <li
+                        className="flex items-start gap-4 mb-5 group cursor-pointer select-none"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleChecklistItem(textContent);
+                        }}
+                    >
+                        <div className={`mt-1 w-6 h-6 rounded-lg flex items-center justify-center border-2 transition-all duration-300 transform active:scale-95 shadow-sm ${isChecked
+                            ? 'bg-[#3B65F5] border-[#3B65F5] text-white rotate-0'
+                            : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 group-hover:border-[#3B65F5]/50'
+                            }`}>
+                            {isChecked ? (
+                                <Check size={16} strokeWidth={4} className="animate-in zoom-in-50 duration-300" />
+                            ) : null}
+                        </div>
+                        <div className="flex-1">
+                            <span className={`${currentFontSize.list} leading-relaxed transition-all duration-300 ${isChecked
+                                ? 'text-slate-400 dark:text-slate-600 line-through decoration-slate-300/50 dark:decoration-slate-700 font-medium italic opacity-80'
+                                : 'text-slate-700 dark:text-slate-200 font-bold'
+                                }`}>
+                                {filteredChildren}
+                            </span>
+                        </div>
+                    </li>
+                );
+            }
+
+            return (
+                <li className="flex items-start gap-3 mb-3 group">
+                    <div className="mt-1.5 flex-shrink-0 text-[#3B65F5]/60 group-hover:text-[#3B65F5] transition-colors">
+                        <CheckCircle2 size={16} />
+                    </div>
+                    <span className={`${currentFontSize.list} text-slate-700 dark:text-slate-300 leading-relaxed font-medium`}>
+                        {children}
+                    </span>
+                </li>
+            );
+        },
         blockquote: ({ children }: any) => (
             <div className="my-6 lg:my-8 relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800/50 border border-blue-100 dark:border-slate-700 shadow-sm p-5 sm:p-7 md:p-8 lg:p-10">
                 <div className="absolute top-0 left-0 w-1.5 md:w-2 h-full bg-blue-500" />
@@ -425,25 +523,13 @@ export default function LessonView() {
             </div>
         ),
         img: ({ src, alt }: any) => (
-            <div
-                className="my-6"
-                style={{
-                    contain: 'content',
-                    isolation: 'isolate'
-                }}
-            >
-                <div
-                    className="relative rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50 dark:shadow-black/20 border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900"
-                >
+            <div className="my-6 contain-content isolation-isolate">
+                <div className="relative rounded-2xl overflow-hidden shadow-lg shadow-slate-200/50 dark:shadow-black/20 border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900">
                     <img
                         src={src}
                         alt={alt}
                         className="w-full h-auto object-cover block"
                         decoding="async"
-                        style={{
-                            contentVisibility: 'auto',
-                            containIntrinsicSize: '100vw 300px'
-                        }}
                     />
                 </div>
                 {alt && <p className="text-center text-xs font-bold uppercase tracking-wider text-slate-400 mt-2">{alt}</p>}
@@ -497,20 +583,18 @@ export default function LessonView() {
         </div>
     );
 
-    // If data is fully loaded and no lesson found
-    if (!loading && !currentLesson) {
-        return <div className="p-8 text-center bg-[#F2F4F6] dark:bg-slate-950 min-h-screen pt-24 text-slate-500 font-bold">Lektion nicht gefunden.</div>;
-    }
-
     // Navigation logic
-    const currentIndex = lessons.findIndex(l => l.id === currentLesson.id);
+    const currentIndex = currentLesson ? lessons.findIndex(l => l.id === currentLesson.id) : 0;
     const prevLesson = currentIndex > 0 ? lessons[currentIndex - 1] : null;
     const nextLesson = currentIndex < lessons.length - 1 ? lessons[currentIndex + 1] : null;
 
     // Use German title always (as requested to remove translation from "Kern"/Header)
     const displayTitle = currentLesson?.titleDE || '';
-    const displayContent = currentLesson?.contentDE || ''; // We handle content interleaving manually
     const displayModuleTitle = m?.titleDE || 'Modul';
+    const firstOpenQuestion = currentLesson
+        ? findFirstOpenQuestionInLesson(currentLesson.id, moduleQuestions, progress)
+        : null;
+    const primaryQuestionId = firstOpenQuestion?.id || lessonQuestions[0]?.id;
 
 
 
@@ -520,45 +604,87 @@ export default function LessonView() {
         return text.replace(/\[!(TIP|WARNING|NOTE|IMPORTANT|CAUTION)\]/gi, '');
     };
 
-    const handleToggleCompletion = async () => {
-        if (!currentLesson) return;
+    const lessonNavigationState = {
+        fromLernplan: Boolean((location.state as any)?.fromLernplan),
+        fromPractice: Boolean((location.state as any)?.fromPractice),
+    };
 
-        const newStatus = !isCompleted;
-        // Optimistic update
-        setIsCompleted(newStatus);
-
-        // Track lesson completion
-        if (newStatus) {
-            const timeSpent = Math.round((Date.now() - lessonStartTime) / 1000);
-            trackEvent('lesson_completed', {
-                lesson_id: currentLesson.id,
-                lesson_name: currentLesson.titleDE,
-                module_id: moduleId,
-                time_spent_seconds: timeSpent
-            });
-        }
-
-        const { data: { user } } = await supabase.auth.getUser();
-
-        if (user) {
-            try {
-                await db.toggleLessonCompletion(user.id, currentLesson.id);
-            } catch (e) {
-                console.error("Error toggling completion:", e);
-                setIsCompleted(!newStatus); // Revert on error
-            }
+    const navigateBackFromLesson = () => {
+        if (location.state && (location.state as any).fromLernplan) {
+            navigate('/');
+        } else if (location.state && (location.state as any).fromPractice) {
+            navigate(`/practice/${moduleId}`);
         } else {
-            // Guest -> Local Storage
-            const completed = JSON.parse(localStorage.getItem('guest_completed_lessons') || '[]');
-            let newCompleted;
-            if (newStatus) {
-                newCompleted = [...completed, currentLesson.id];
-            } else {
-                newCompleted = completed.filter((id: string) => id !== currentLesson.id);
-            }
-            localStorage.setItem('guest_completed_lessons', JSON.stringify(newCompleted));
+            navigate(`/learn/${moduleId}`);
         }
     };
+
+    const navigateToLessonQuestions = (questionId?: string) => {
+        if (!moduleId || !currentLesson) return;
+
+        navigate(
+            buildLessonQuestionPath(moduleId, currentLesson.id, questionId),
+            {
+                state: {
+                    ...lessonNavigationState,
+                    fromLesson: true,
+                },
+            },
+        );
+    };
+
+    const goToNextLesson = () => {
+        if (!moduleId) return;
+
+        const nextIndex = lessons.findIndex(l => l.id === nextLesson?.id);
+        const isNextFirstLesson = nextIndex === 0;
+        const isIntroModule = m?.title_de === 'Einführung und Grundlagen' || m?.titleDE === 'Einführung und Grundlagen';
+        if (nextLesson && !isNextFirstLesson && !isPremium && !isIntroModule) {
+            openPaywall('Premium Lektionen');
+            return;
+        }
+
+        if (nextLesson) {
+            navigate(`/learn/${moduleId}/lesson/${nextLesson.id}`, { state: location.state });
+            return;
+        }
+
+        navigateBackFromLesson();
+    };
+
+    const handleQuestionlessCompletion = async () => {
+        if (!currentLesson) return;
+
+        try {
+            if (!isCompleted) {
+                await setLessonCompletion(currentLesson.id, true);
+                const timeSpent = Math.round((Date.now() - lessonStartTime) / 1000);
+                trackEvent('lesson_completed', {
+                    lesson_id: currentLesson.id,
+                    lesson_name: currentLesson.titleDE,
+                    module_id: moduleId,
+                    time_spent_seconds: timeSpent
+                });
+            }
+        } catch (e) {
+            console.error("Error completing lesson:", e);
+        }
+    };
+
+    useEffect(() => {
+        if (!(location.state as any)?.scrollToQuestions || !questionSectionRef.current) return;
+
+        const timer = window.setTimeout(() => {
+            questionSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 250);
+
+        return () => window.clearTimeout(timer);
+    }, [currentLesson, location.state]);
+
+    // If data is fully loaded and no lesson found
+    if (!loading && !currentLesson) {
+        return <div className="p-8 text-center bg-[#F2F4F6] dark:bg-slate-950 min-h-screen pt-24 text-slate-500 font-bold">Lektion nicht gefunden.</div>;
+    }
 
 
 
@@ -567,18 +693,10 @@ export default function LessonView() {
             {/* Header */}
             <div
                 className={`fixed top-0 left-0 lg:left-[280px] right-0 z-30 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 h-[72px] flex items-center justify-between transition-transform duration-300 shadow-sm will-change-transform ${showHeader ? 'translate-y-0' : '-translate-y-full'}`}
-                style={{ contain: 'layout style' }}
             >
                 <button
-                    onClick={() => {
-                        if (location.state && (location.state as any).fromQuestion) {
-                            navigate(-1);
-                        } else if (location.state && (location.state as any).fromPractice) {
-                            navigate(`/practice/${moduleId}`);
-                        } else {
-                            navigate(`/learn/${moduleId}`);
-                        }
-                    }}
+                    onClick={navigateBackFromLesson}
+                    aria-label="Zurück"
                     className="md:hidden w-14 h-14 rounded-xl bg-slate-100 dark:bg-slate-800 border-2 border-transparent text-slate-600 dark:text-slate-300 hover:border-slate-200 dark:hover:border-slate-700 active:scale-95 transition-all flex items-center justify-center p-0"
                 >
                     <ArrowLeft size={28} strokeWidth={2.5} />
@@ -589,15 +707,8 @@ export default function LessonView() {
 
                     {/* Desktop Back Button (Visible only on md+) */}
                     <button
-                        onClick={() => {
-                            if (location.state && (location.state as any).fromQuestion) {
-                                navigate(-1);
-                            } else if (location.state && (location.state as any).fromPractice) {
-                                navigate(`/practice/${moduleId}`);
-                            } else {
-                                navigate(`/learn/${moduleId}`);
-                            }
-                        }}
+                        onClick={navigateBackFromLesson}
+                        aria-label="Zurück"
                         className="hidden md:flex items-center gap-2 px-3 py-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 rounded-lg transition-all absolute left-4 xl:left-8"
                     >
                         <ArrowLeft size={20} strokeWidth={2.5} />
@@ -609,7 +720,7 @@ export default function LessonView() {
                         {loading || !currentLesson ? (
                             <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse"></div>
                         ) : (
-                            <span className="font-bold text-slate-900 dark:text-white text-[12px] sm:text-sm text-center leading-tight line-clamp-2 break-words w-full max-w-[300px] md:max-w-md" style={{ hyphens: 'auto', WebkitHyphens: 'auto', textWrap: 'balance' } as any}>
+                            <span className="font-bold text-slate-900 dark:text-white text-[12px] sm:text-sm text-center leading-tight line-clamp-2 break-words w-full max-w-[300px] md:max-w-md">
                                 {cleanTitle(displayTitle)}
                             </span>
                         )}
@@ -621,11 +732,11 @@ export default function LessonView() {
 
                 {/* Header Actions Group */}
                 <div className="flex items-center bg-white dark:bg-slate-800 rounded-xl border-2 border-slate-100 dark:border-slate-700 p-1 shadow-sm h-14">
-                    {/* Language Toggle */}
                     {showLanguageToggle && (
                         <>
                             <button
                                 onClick={toggleLanguage}
+                                aria-label="Sprache wechseln"
                                 className={`w-14 h-full rounded-lg flex items-center justify-center transition-all active:scale-95 ${language === 'DE_AR'
                                     ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
                                     : 'text-slate-400 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
@@ -641,6 +752,7 @@ export default function LessonView() {
                     {/* Settings Button */}
                     <button
                         onClick={() => setShowSettings(true)}
+                        aria-label="Einstellungen"
                         className="w-14 h-full rounded-lg flex items-center justify-center text-slate-400 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all active:scale-95"
                     >
                         <Settings size={24} strokeWidth={2} />
@@ -668,28 +780,6 @@ export default function LessonView() {
                         <span className="truncate min-w-0">{displayModuleTitle}</span>
                     </div>
 
-                    {!!currentLesson?.imageUrl && (
-                        <div className="mb-6 mt-3">
-                            <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 shadow-lg shadow-slate-200/40 dark:shadow-black/20">
-                                <img
-                                    src={currentLesson.imageUrl}
-                                    alt={`KI Bild fuer ${currentLesson.titleDE}`}
-                                    className="w-full h-auto object-cover block"
-                                    loading="lazy"
-                                    decoding="async"
-                                />
-                            </div>
-                            <div className="mt-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                                <span>KI Bild</span>
-                                {currentLesson.imageStyleCode && (
-                                    <>
-                                        <span className="text-slate-300 dark:text-slate-600">•</span>
-                                        <span>{currentLesson.imageStyleCode}</span>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    )}
 
                     {/* Content Rendering - Paragraph by Paragraph */}
                     <div className="relative z-10 text-slate-600 dark:text-slate-300">
@@ -826,47 +916,111 @@ export default function LessonView() {
                         )}
                     </div>
 
-
-                    {/* Quiz Button */}
-                    {hasQuiz && (
-                        <div className="mt-12 mb-4">
-                            <button
-                                onClick={() => navigate(`/learn/${moduleId}/lesson/${lessonId}/quiz`)}
-                                className="w-full py-3 rounded-xl font-bold text-sm shadow-sm border border-transparent transition-all active:scale-[0.98] flex items-center justify-center gap-2 bg-blue-600 text-white hover:bg-blue-700"
-                            >
-                                <PlayCircle size={18} className="flex-shrink-0" />
-                                <div className="flex flex-col items-start">
-                                    <span>Quiz starten</span>
-                                    {language === 'DE_AR' && (
-                                        <span className="text-[10px] text-white/80 font-medium" dir="rtl">ابدأ الاختبار</span>
-                                    )}
+                    <section
+                        ref={questionSectionRef}
+                        className="mt-12 rounded-[28px] border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 p-5 sm:p-6 scroll-mt-28"
+                    >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-5">
+                            <div>
+                                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400 mb-3">
+                                    <AlertCircle size={14} className="text-primary" />
+                                    Fragen zu dieser Lektion
                                 </div>
-                            </button>
-                        </div>
-                    )}
+                                <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                                    {isQuestionLesson
+                                        ? `${questionProgress.answered} von ${questionProgress.total} Fragen beantwortet`
+                                        : 'Diese Lektion hat keine zugeordneten Fragen'}
+                                </h3>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                                    {isQuestionLesson
+                                        ? 'Sobald alle Fragen mindestens einmal beantwortet wurden, gilt die Lektion als abgeschlossen.'
+                                        : 'Diese Lektion schließt du über den Weiter-Button unten ab.'}
+                                </p>
+                            </div>
 
-                    {/* Explicit Completion Button at the end of content */}
-                    <div className={hasQuiz ? "mb-4" : "mt-12 mb-4"}>
-                        <button
-                            onClick={handleToggleCompletion}
-                            className={`w-full py-3 rounded-xl font-bold text-sm shadow-sm border transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${isCompleted
-                                ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/30'
-                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                                }`}
-                        >
-                            {isCompleted ? (
-                                <>
-                                    <CheckCircle2 size={18} className="flex-shrink-0" />
-                                    <span>Lektion abgeschlossen (Widerrufen)</span>
-                                </>
-                            ) : (
-                                <>
-                                    <CheckCircle2 size={18} className="flex-shrink-0 opacity-50" />
-                                    <span>Lektion abschließen</span>
-                                </>
+                            {isQuestionLesson && primaryQuestionId && (
+                                <button
+                                    onClick={() => navigateToLessonQuestions(primaryQuestionId)}
+                                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary hover:bg-primary-hover text-white px-5 py-3 font-bold shadow-lg shadow-blue-500/20 transition-all active:scale-[0.98]"
+                                >
+                                    <span>{questionProgress.answered > 0 ? 'Fragen fortsetzen' : 'Fragen starten'}</span>
+                                    <ChevronRight size={18} />
+                                </button>
                             )}
-                        </button>
-                    </div>
+                        </div>
+
+                        {isQuestionLesson ? (
+                            <div className="space-y-3">
+                                {lessonQuestions.map((question, index) => {
+                                    const hasAnswer = Object.prototype.hasOwnProperty.call(progress.answeredQuestions, question.id);
+                                    const isCorrect = progress.answeredQuestions[question.id] === true;
+                                    const statusLabel = !hasAnswer
+                                        ? 'Offen'
+                                        : isCorrect
+                                            ? 'Richtig beantwortet'
+                                            : 'Falsch beantwortet';
+
+                                    return (
+                                        <button
+                                            key={question.id}
+                                            onClick={() => navigateToLessonQuestions(question.id)}
+                                            className={`w-full rounded-2xl border px-4 py-4 text-left transition-all active:scale-[0.99] ${!hasAnswer
+                                                ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-primary/40'
+                                                : isCorrect
+                                                    ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800/60 hover:border-emerald-300'
+                                                    : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/60 hover:border-amber-300'
+                                                }`}
+                                        >
+                                            <div className="flex items-start gap-3">
+                                                <div className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl font-black ${!hasAnswer
+                                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300'
+                                                    : isCorrect
+                                                        ? 'bg-emerald-500 text-white'
+                                                        : 'bg-amber-500 text-white'
+                                                    }`}>
+                                                    {!hasAnswer ? (
+                                                        <Circle size={16} />
+                                                    ) : isCorrect ? (
+                                                        <Check size={18} strokeWidth={3} />
+                                                    ) : (
+                                                        <AlertCircle size={16} />
+                                                    )}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                                                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                                                            Frage {index + 1}
+                                                        </span>
+                                                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold ${!hasAnswer
+                                                            ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-300'
+                                                            : isCorrect
+                                                                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                                                                : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                                                            }`}>
+                                                            {statusLabel}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-sm font-bold text-slate-900 dark:text-white leading-relaxed">
+                                                        {question.textDE}
+                                                    </p>
+                                                </div>
+                                                <ChevronRight size={18} className="mt-1 text-slate-400" />
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className={`rounded-2xl border px-4 py-4 text-sm font-medium ${isCompleted
+                                ? 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-900/10 text-emerald-700 dark:text-emerald-300'
+                                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                                }`}>
+                                {isCompleted
+                                    ? 'Diese Lektion wurde bereits abgeschlossen.'
+                                    : 'Lies die Inhalte in Ruhe durch. Danach kannst du unten direkt mit der nächsten Lektion weitermachen.'}
+                            </div>
+                        )}
+                    </section>
                 </article>
             </div>
 
@@ -904,57 +1058,38 @@ export default function LessonView() {
 
                     <button
                         onClick={async () => {
-                            // Automatically mark current lesson as completed
-                            if (currentLesson && !isCompleted) {
-                                const { data: { user } } = await supabase.auth.getUser();
-
-                                if (user) {
-                                    try {
-                                        await db.toggleLessonCompletion(user.id, currentLesson.id);
-                                        setIsCompleted(true);
-                                    } catch (e) {
-                                        console.error("Error marking lesson complete:", e);
-                                    }
-                                } else {
-                                    // Guest -> Local Storage
-                                    const completed = JSON.parse(localStorage.getItem('guest_completed_lessons') || '[]');
-                                    if (!completed.includes(currentLesson.id)) {
-                                        completed.push(currentLesson.id);
-                                        localStorage.setItem('guest_completed_lessons', JSON.stringify(completed));
-                                        setIsCompleted(true);
-                                    }
-                                }
-                            }
-
-                            // Then navigate
-                            if (nextLesson) {
-                                // Check if next lesson is accessible
-                                const nextIndex = lessons.findIndex(l => l.id === nextLesson.id);
-                                const isNextFirstLesson = nextIndex === 0;
-                                // All lessons in "Einführung und Grundlagen" module are free
-                                const isIntroModule = m?.title_de === 'Einführung und Grundlagen' || m?.titleDE === 'Einführung und Grundlagen';
-                                if (!isNextFirstLesson && !isPremium && !isIntroModule) {
-                                    openPaywall('Premium Lektionen');
+                            if (isQuestionLesson) {
+                                if (primaryQuestionId && !questionProgress.allAnswered) {
+                                    navigateToLessonQuestions(primaryQuestionId);
                                     return;
                                 }
-                                navigate(`/learn/${moduleId}/lesson/${nextLesson.id}`);
+
+                                goToNextLesson();
                             } else {
-                                // Last lesson: Go back to module
-                                navigate(`/learn/${moduleId}`);
+                                await handleQuestionlessCompletion();
+                                goToNextLesson();
                             }
                         }}
-                        className={`h-14 flex-1 sm:flex-none sm:px-10 flex items-center justify-center gap-2 rounded-2xl font-bold text-white shadow-lg transition-all active:scale-95 ${nextLesson
+                        className={`h-14 flex-1 sm:flex-none sm:px-10 flex items-center justify-center gap-2 rounded-2xl font-bold text-white shadow-lg transition-all active:scale-95 ${nextLesson || isQuestionLesson
                             ? 'bg-primary hover:bg-primary-hover shadow-primary/25'
                             : 'bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
                             }`}
                     >
                         <span className="text-sm sm:text-base">
-                            {nextLesson
-                                ? 'Weiter'
-                                : 'Zurück zur Übersicht'
+                            {isQuestionLesson && !questionProgress.allAnswered
+                                ? (questionProgress.answered > 0 ? 'Fragen fortsetzen' : 'Fragen starten')
+                                : nextLesson
+                                    ? 'Weiter zur nächsten Lektion'
+                                    : (location.state && (location.state as any).fromLernplan)
+                                        ? 'Zurück zum Lernplan'
+                                        : 'Zurück zur Übersicht'
                             }
                         </span>
-                        {nextLesson ? <ChevronRight size={20} /> : <BookOpen size={20} />}
+                        {isQuestionLesson && !questionProgress.allAnswered
+                            ? <AlertCircle size={18} />
+                            : nextLesson
+                                ? <ChevronRight size={20} />
+                                : <BookOpen size={20} />}
                     </button>
                 </div>
             </div>

@@ -9,7 +9,7 @@ import { PlayCircle, CheckCircle2, ArrowLeft, Lock, X, Languages, Crown } from '
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { db } from '../../services/database';
-import { supabase } from '../../lib/supabase';
+import { getCompletedLessonCountForModule } from '../../services/lessonFlow';
 
 const stripMarkdown = (text: string) => {
     return text
@@ -39,7 +39,7 @@ const HighlightMatch = ({ text, highlight }: { text: string, highlight: string }
 export default function ModuleList({ embedded = false }: { embedded?: boolean }) {
     const navigate = useNavigate();
     const { language, progress, user, showLanguageToggle, toggleLanguage, isPremium, openPaywall } = useApp();
-    const { modules } = useDataCache();
+    const { modules, questions } = useDataCache();
     const { user: authUser } = useAuth();
 
 
@@ -50,10 +50,6 @@ export default function ModuleList({ embedded = false }: { embedded?: boolean })
     // Search state
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [isSearching, setIsSearching] = useState(false);
-
-    // Lesson completion state
-    const [completedLessonIds, setCompletedLessonIds] = useState<string[]>([]);
-    const [totalLessonsCountFromDB, setTotalLessonsCountFromDB] = useState(0);
 
     // Smart Sticky Button Logic
     const [showFloatingButton, setShowFloatingButton] = useState(false);
@@ -85,38 +81,6 @@ export default function ModuleList({ embedded = false }: { embedded?: boolean })
         window.addEventListener('scroll', handleScroll, { capture: true });
         return () => window.removeEventListener('scroll', handleScroll, { capture: true });
     }, [embedded]);
-
-
-
-
-    // Fetch completed lessons and total count
-    useEffect(() => {
-        const fetchStats = async () => {
-            // 1. Fetch total count
-            try {
-                const { count } = await supabase.from('lessons').select('*', { count: 'exact', head: true });
-                if (count !== null) setTotalLessonsCountFromDB(count);
-            } catch (e) {
-                console.error("Error fetching total count:", e);
-            }
-
-            // 2. Fetch completion
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                try {
-                    const completed = await db.getCompletedLessons(user.id);
-                    setCompletedLessonIds(completed);
-                } catch (e) {
-                    console.error("Error fetching completed lessons:", e);
-                }
-            } else {
-                // Guest - use localStorage
-                const completed = JSON.parse(localStorage.getItem('guest_completed_lessons') || '[]');
-                setCompletedLessonIds(completed);
-            }
-        };
-        fetchStats();
-    }, []); // Only fetch once on mount
 
     // Search effect
     useEffect(() => {
@@ -150,7 +114,7 @@ export default function ModuleList({ embedded = false }: { embedded?: boolean })
     const getModuleProgress = (module: Module) => {
         const moduleLessons = module.lessons || [];
         if (moduleLessons.length === 0) return 0;
-        const completedCount = moduleLessons.filter(l => completedLessonIds.includes(l.id)).length;
+        const completedCount = getCompletedLessonCountForModule(module.id, modules, questions, progress);
         return (completedCount / moduleLessons.length) * 100;
     };
 
@@ -173,19 +137,17 @@ export default function ModuleList({ embedded = false }: { embedded?: boolean })
         for (const mod of modules) {
             const moduleLessons = mod.lessons || [];
             totalLessons += moduleLessons.length;
-            totalCompleted += moduleLessons.filter(l => completedLessonIds.includes(l.id)).length;
+            totalCompleted += getCompletedLessonCountForModule(mod.id, modules, questions, progress);
         }
 
-        const finalTotal = totalLessons === 0 ? totalLessonsCountFromDB : totalLessons;
-        return finalTotal > 0 ? (totalCompleted / finalTotal) * 100 : 0;
+        return totalLessons > 0 ? (totalCompleted / totalLessons) * 100 : 0;
     };
 
     // Calculate total completed lessons count for stats
     const getTotalCompletedLessons = () => {
         let total = 0;
         for (const mod of modules) {
-            const moduleLessons = mod.lessons || [];
-            total += moduleLessons.filter(l => completedLessonIds.includes(l.id)).length;
+            total += getCompletedLessonCountForModule(mod.id, modules, questions, progress);
         }
         return total;
     };

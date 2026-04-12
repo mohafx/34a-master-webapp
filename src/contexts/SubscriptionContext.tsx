@@ -3,6 +3,14 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { toast } from './ToastContext';
 import { usePostHog } from './PostHogProvider';
+import { hasPremiumAccess } from '../utils/subscription';
+import { useDevPanel } from '../devpanel/DevPanelContext';
+import {
+  type AccessGrant,
+  type TransitionNoticeStage,
+  TRANSITION_GRANT_SOURCE,
+  isTransitionGrantActive,
+} from '../utils/transitionAccess';
 
 export interface Subscription {
   id: string;
@@ -15,34 +23,108 @@ export interface Subscription {
   provider_customer_id?: string;
 }
 
+type PremiumSource = 'stripe' | 'transition' | 'dev' | 'test' | null;
+
 interface SubscriptionContextType {
   subscription: Subscription | null;
+  transitionGrant: AccessGrant | null;
   isPremium: boolean;
+  premiumSource: PremiumSource;
+  hasActiveTransitionGrant: boolean;
   loading: boolean;
   refreshSubscription: () => Promise<void>;
   restorePurchases: () => Promise<void>;
   manageSubscription: () => Promise<void>;
-  openCheckout: (plan: 'monthly' | '6months') => Promise<string | null>;
+  openCheckout: (plan: '6months') => Promise<string | null>;
   processPaymentSuccess: () => Promise<void>;
+  markTransitionNotice: (stage: TransitionNoticeStage) => Promise<void>;
+  transitionNoticeReplayNonce: number;
 }
 
 const SubscriptionContext = createContext<SubscriptionContextType | undefined>(undefined);
 
+function createDevTransitionGrant(userId: string, state: string): AccessGrant | null {
+  if (state === 'none') return null;
+
+  const now = new Date();
+  const startsAt = new Date(now.getTime() - 60 * 60 * 1000);
+  const endsAt = new Date(now);
+  let firstSeenAt: string | null = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+
+  if (state === 'active_7_days') {
+    endsAt.setDate(endsAt.getDate() + 7);
+    firstSeenAt = null;
+  } else if (state === 'active_2_days') {
+    endsAt.setDate(endsAt.getDate() + 2);
+  } else if (state === 'active_last_day') {
+    endsAt.setHours(endsAt.getHours() + 12);
+  } else if (state === 'expired') {
+    endsAt.setHours(endsAt.getHours() - 2);
+  }
+
+  return {
+    id: `dev-transition-${state}`,
+    user_id: userId,
+    type: 'premium_transition',
+    source: TRANSITION_GRANT_SOURCE,
+    status: 'active',
+    starts_at: startsAt.toISOString(),
+    ends_at: endsAt.toISOString(),
+    first_seen_at: firstSeenAt,
+    last_notice_at: null,
+    last_notice_stage: null,
+    created_at: startsAt.toISOString(),
+    metadata: { devPanel: true, state },
+  };
+}
+
 export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { trackEvent } = usePostHog();
+  const { isOverrideActive, overrideState, transitionState, transitionNoticeReplayNonce } = useDevPanel();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [transitionGrant, setTransitionGrant] = useState<AccessGrant | null>(null);
   const [loading, setLoading] = useState(true);
 
   // ===== ENTITLEMENT LOGIC =====
-  // TEMPORARY: All content is free for maximum reach.
-  // Original entitlement logic preserved in git history.
-  // To re-enable premium gating, revert this single line.
-  const isPremium = true;
+  const isTestMode = window.location.search.includes('testsprite=true') || localStorage.getItem('testsprite_mode') === 'true';
+  const isDevPremium = isOverrideActive && overrideState === 'premium';
+  const hasStripePremiumAccess = hasPremiumAccess(subscription, false);
+  const hasActiveTransitionGrant = isTransitionGrantActive(transitionGrant);
+  const isPremium = isDevPremium || hasStripePremiumAccess || hasActiveTransitionGrant || isTestMode;
+  const premiumSource: PremiumSource = isDevPremium
+    ? 'dev'
+    : hasStripePremiumAccess
+      ? 'stripe'
+      : hasActiveTransitionGrant
+        ? 'transition'
+        : isTestMode
+          ? 'test'
+          : null;
 
   const fetchSubscription = async () => {
+    if (isOverrideActive) {
+      if (overrideState === 'premium' && user) {
+        setSubscription({
+          id: 'dev-premium-subscription',
+          user_id: user.id,
+          status: 'active',
+          plan: '6months',
+          provider: 'stripe',
+          current_period_end: null,
+          created_at: new Date().toISOString(),
+        });
+      } else {
+        setSubscription(null);
+      }
+      setTransitionGrant(user ? createDevTransitionGrant(user.id, transitionState) : null);
+      setLoading(false);
+      return;
+    }
+
     if (!user) {
       setSubscription(null);
+      setTransitionGrant(null);
       setLoading(false);
       return;
     }
@@ -59,6 +141,21 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       }
 
       setSubscription(data || null);
+
+      const { data: grantData, error: grantError } = await supabase
+        .from('access_grants')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('source', TRANSITION_GRANT_SOURCE)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (grantError && grantError.code !== 'PGRST116') {
+        console.warn('Transition access grant could not be loaded:', grantError);
+      }
+
+      setTransitionGrant((grantData as AccessGrant | null) || null);
     } catch (err) {
       console.error('Error fetching subscription:', err);
     } finally {
@@ -67,11 +164,21 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshSubscription = async () => {
+    if (isOverrideActive) {
+      await fetchSubscription();
+      return;
+    }
+
     setLoading(true);
     await fetchSubscription();
   };
 
   const manageSubscription = async () => {
+    if (isOverrideActive) {
+      toast.info('Abo-Verwaltung ist im Dev-Panel nur lokal simuliert.');
+      return;
+    }
+
     if (!user) return;
     setLoading(true);
     try {
@@ -91,6 +198,11 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   };
 
   const restorePurchases = async () => {
+    if (isOverrideActive) {
+      toast.info('Wiederherstellen ist im Dev-Panel deaktiviert. Nutze einfach den Premium-Button.');
+      return;
+    }
+
     const traceId = `restore_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     if (!user) {
@@ -200,7 +312,12 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const openCheckout = async (plan: 'monthly' | '6months') => {
+  const openCheckout = async (plan: '6months') => {
+    if (isOverrideActive) {
+      toast.info(`Checkout für ${plan} wird im Dev-Panel nicht echt gestartet.`);
+      return null;
+    }
+
     if (!user) {
       console.error('User must be logged in to checkout');
       return null;
@@ -239,7 +356,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       // Track checkout started
       trackEvent('checkout_started', {
         plan: plan,
-        price: plan === '6months' ? 49 : 19.90
+        price: 49
       });
 
       console.log('Got clientSecret, length:', data.clientSecret?.length);
@@ -252,6 +369,11 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
   // Called directly after embedded checkout completes - more reliable than URL-based detection
   const processPaymentSuccess = async () => {
+    if (isOverrideActive) {
+      toast.success('Premium ist im Dev-Panel lokal aktiv.');
+      return;
+    }
+
     const debugLog = (msg: string, data?: any) => {
       const ts = new Date().toISOString().substr(11, 12);
       console.log(`[PAYMENT-SUCCESS ${ts}] ${msg}`, data || '');
@@ -280,7 +402,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         // Track subscription activated
         trackEvent('subscription_activated', {
           plan: details?.plan,
-          price: details?.plan === '6months' ? 49 : 19.90,
+          price: 49,
           source: 'checkout'
         });
 
@@ -327,12 +449,47 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const markTransitionNotice = async (stage: TransitionNoticeStage) => {
+    if (!transitionGrant) return;
+
+    const nowIso = new Date().toISOString();
+    const applyLocalUpdate = () => {
+      setTransitionGrant((current) => {
+        if (!current || current.id !== transitionGrant.id) return current;
+        return {
+          ...current,
+          first_seen_at: current.first_seen_at || nowIso,
+          last_notice_at: nowIso,
+          last_notice_stage: stage,
+        };
+      });
+    };
+
+    if (isOverrideActive || transitionGrant.id.startsWith('dev-transition-')) {
+      applyLocalUpdate();
+      return;
+    }
+
+    try {
+      const { error } = await supabase.rpc('mark_access_grant_notice', {
+        p_grant_id: transitionGrant.id,
+        p_stage: stage,
+      });
+
+      if (error) throw error;
+      applyLocalUpdate();
+    } catch (err) {
+      console.warn('Transition notice state could not be saved:', err);
+    }
+  };
+
   useEffect(() => {
     fetchSubscription();
-  }, [user]);
+  }, [user, isOverrideActive, overrideState, transitionState]);
 
   // Listen for subscription changes in real-time
   useEffect(() => {
+    if (isOverrideActive) return;
     if (!user) return;
 
     const channel = supabase
@@ -349,15 +506,28 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           fetchSubscription();
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'access_grants',
+          filter: `user_id=eq.${user.id}`
+        },
+        () => {
+          fetchSubscription();
+        }
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, isOverrideActive]);
 
   // Check for checkout return (handles HashRouter URLs like /#/profile?payment=success)
   useEffect(() => {
+    if (isOverrideActive) return;
     const checkPaymentReturn = async () => {
       // For HashRouter, params can be in the hash (e.g., /#/profile?payment=success)
       const hash = window.location.hash; // e.g., "#/profile?payment=success&session_id=cs_xxx"
@@ -489,10 +659,24 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     if (user) {
       checkPaymentReturn();
     }
-  }, [user]);
+  }, [user, isOverrideActive]);
 
   return (
-    <SubscriptionContext.Provider value={{ subscription, isPremium, loading, refreshSubscription, restorePurchases, manageSubscription, openCheckout, processPaymentSuccess }}>
+    <SubscriptionContext.Provider value={{
+      subscription,
+      transitionGrant,
+      isPremium,
+      premiumSource,
+      hasActiveTransitionGrant,
+      loading,
+      refreshSubscription,
+      restorePurchases,
+      manageSubscription,
+      openCheckout,
+      processPaymentSuccess,
+      markTransitionNotice,
+      transitionNoticeReplayNonce
+    }}>
       {children}
     </SubscriptionContext.Provider>
   );

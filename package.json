@@ -11,6 +11,10 @@
     "pilot:explanations:edge": "ts-node --esm scripts/run-explanation-pilot-edge.ts",
     "pilot:lesson-images": "ts-node --esm scripts/run-lesson-image-pilot.ts",
     "pilot:written-regen": "ts-node --esm scripts/run-written-regeneration.ts",
+    "transition:dry-run": "node scripts/transition-access.mjs dry-run",
+    "transition:apply": "node scripts/transition-access.mjs apply",
+    "transition:status": "node scripts/transition-access.mjs status",
+    "test:transition-access": "vitest run tests/transitionAccess.test.ts",
     "test:question-pipeline": "vitest run tests/question-explanation-pipeline.validation.test.ts",
     "test:written-regen-pipeline": "vitest run tests/written-exam-regeneration.validation.test.ts",
     "test:written-regen-integration": "vitest run tests/written-exam-regeneration.integration.test.ts"

@@ -272,6 +272,40 @@ export const db = {
         }
     },
 
+    async setLessonCompletion(userId: string, lessonId: string, completed: boolean): Promise<boolean> {
+        const { data: existing } = await supabase
+            .from('user_lesson_progress')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('lesson_id', lessonId)
+            .maybeSingle();
+
+        if (completed) {
+            if (existing) return true;
+
+            const { error } = await supabase
+                .from('user_lesson_progress')
+                .insert({
+                    user_id: userId,
+                    lesson_id: lessonId,
+                    completed_at: new Date().toISOString()
+                });
+
+            if (error) throw error;
+            return true;
+        }
+
+        if (!existing) return false;
+
+        const { error } = await supabase
+            .from('user_lesson_progress')
+            .delete()
+            .eq('id', existing.id);
+
+        if (error) throw error;
+        return false;
+    },
+
     async getCompletedLessons(userId: string): Promise<string[]> {
         const { data, error } = await supabase
             .from('user_lesson_progress')
@@ -592,6 +626,33 @@ export const db = {
             }, { onConflict: 'id' });
 
         if (error) throw error;
+    },
+
+    async resetUserProgress(userId: string) {
+        const tables = [
+            'user_progress',
+            'user_bookmarks',
+            'user_lesson_progress',
+            'user_flashcard_progress',
+            'user_lesson_quiz_results',
+            'written_exam_sessions'
+        ];
+
+        // Delete from all progress tables
+        const results = await Promise.all(
+            tables.map(table =>
+                supabase.from(table).delete().eq('user_id', userId)
+            )
+        );
+
+        // Also clear exam_date in user_profiles
+        await supabase.from('user_profiles').update({ 
+            exam_date: null,
+            updated_at: new Date().toISOString()
+        }).eq('id', userId);
+
+        const error = results.find(r => r.error);
+        if (error) throw error.error;
     },
 
     // ========== WRITTEN EXAM ==========
@@ -1027,6 +1088,15 @@ export const guestStorage = {
             acc[id] = true;
             return acc;
         }, {});
+    },
+
+    setLessonCompletion: (lessonId: string, completed: boolean) => {
+        const existing = JSON.parse(localStorage.getItem('guest_completed_lessons') || '[]');
+        const next = completed
+            ? Array.from(new Set([...existing, lessonId]))
+            : existing.filter((id: string) => id !== lessonId);
+
+        localStorage.setItem('guest_completed_lessons', JSON.stringify(next));
     },
 
 

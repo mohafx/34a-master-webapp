@@ -46,8 +46,7 @@ serve(async (req) => {
 
         // MAP internal price IDs to Stripe Price IDs
         const PRICE_MAPPING = {
-            'monthly': Deno.env.get("STRIPE_PRICE_MONTHLY_ID") || "price_1Q...",
-            '6months': Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1SkDnT4CFd3pD2h04IB2Riyn",
+            '6months': Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1SgXd94CFd3pD2h0Nah9Fnkz",
         };
 
         const stripePriceId = PRICE_MAPPING[priceId as keyof typeof PRICE_MAPPING];
@@ -61,9 +60,9 @@ serve(async (req) => {
         }
 
         // 3. Create Stripe Checkout Session (Embedded)
-        // Monthly = recurring subscription, 6-Months = one-time payment
-        const isSubscription = priceId === 'monthly'; // Only monthly is subscription
-        console.log("Creating Embedded Session with price:", stripePriceId, "for user:", user.id, "mode:", isSubscription ? 'subscription' : 'payment');
+        // 6-Months = one-time payment
+        const isSubscription = false;
+        console.log("Creating Embedded Session with price:", stripePriceId, "for user:", user.id, "mode: payment");
 
         const session = await stripe.checkout.sessions.create({
             // Note: payment_method_types is required for embedded checkout
@@ -75,33 +74,22 @@ serve(async (req) => {
                     quantity: 1,
                 },
             ],
-            mode: isSubscription ? "subscription" : "payment",
+            mode: "payment",
             ui_mode: 'embedded',
             return_url: `${req.headers.get("origin")}/#/profile?payment=success&session_id={CHECKOUT_SESSION_ID}`,
             customer_email: user.email,
-            // customer_creation is only valid for 'payment' mode, subscriptions auto-create customers
-            ...(isSubscription ? {} : { customer_creation: 'always' }),
+            customer_creation: 'always',
             client_reference_id: user.id,
             metadata: {
                 user_id: user.id,
                 plan_type: priceId,
             },
-            // Use subscription_data for subscriptions, payment_intent_data for one-time payments
-            ...(isSubscription ? {
-                subscription_data: {
-                    metadata: {
-                        user_id: user.id,
-                        plan_type: priceId,
-                    }
+            payment_intent_data: {
+                metadata: {
+                    user_id: user.id,
+                    plan_type: priceId,
                 }
-            } : {
-                payment_intent_data: {
-                    metadata: {
-                        user_id: user.id,
-                        plan_type: priceId,
-                    }
-                }
-            }),
+            }
         });
 
         console.log("Embedded Session created:", session.id);

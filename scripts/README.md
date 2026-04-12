@@ -8,6 +8,7 @@ This folder only keeps the active operational scripts.
 - `run-lesson-image-pilot.ts` - local-first lesson image pipeline runner (Worker API + Supabase Storage).
 - `read-batch.ts` - reads and formats batch review content.
 - `admin_configure_free_tier.ts` - admin helper for free-tier configuration.
+- `transition-access.mjs` - admin helper for the paywall transition grant dry-run/apply/status flow.
 
 ## Output location for review files
 - Default: `local_archive/batch_reviews/`
@@ -21,6 +22,13 @@ EXPLANATION_REVIEW_OUTPUT_DIR=local_archive/batch_reviews npm run pilot:explanat
 Lesson image example (first image in module 1 / lesson 1):
 ```bash
 npm run pilot:lesson-images -- --module-order=1 --lesson-order=1 --count=1 --style=sachkunde_real_clean
+```
+
+Paywall transition examples:
+```bash
+npm run transition:dry-run
+npm run transition:apply
+npm run transition:status
 ```
 
 ## Legacy scripts

@@ -5,12 +5,16 @@ import { useAuth } from '../../contexts/AuthContext';
 import { User, LogOut, Moon, Sun, Bell, Trash2, Info, Sparkles, Crown, Languages, Bookmark, BarChart3, ArrowLeft, Shield, Eye } from 'lucide-react';
 import { AuthDialog } from '../auth/AuthDialog';
 import { useSubscription } from '../../contexts/SubscriptionContext';
+import { TransitionAccessNotice } from '../TransitionAccessNotice';
+import { db } from '../../services/database';
+import { isAdminEmail } from '../../utils/userRoles';
+import { getEffectiveExamDate, setEffectiveExamDate } from '../../utils/appStorage';
 
 export default function Profile() {
-  const { user, logout, progress, language, toggleLanguage, showLanguageToggle, setShowLanguageToggle, settings, updateSettings, openOnboarding } = useApp();
-  const { isPremium, restorePurchases, subscription, manageSubscription } = useSubscription();
+  const { user, logout, progress, language, toggleLanguage, showLanguageToggle, setShowLanguageToggle, settings, updateSettings, openOnboarding, openPaywall } = useApp();
+  const { isPremium, restorePurchases, subscription, manageSubscription, premiumSource } = useSubscription();
   const { user: authUser } = useAuth();
-  const isAdmin = authUser?.email === 'm.almajzoub1@gmail.com';
+  const isAdmin = isAdminEmail(authUser?.email);
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const navigate = useNavigate();
 
@@ -19,12 +23,12 @@ export default function Profile() {
 
   // Lifted Exam Date State
   const [examDate, setExamDate] = useState<string | null>(() => {
-    return localStorage.getItem('examDate');
+    return getEffectiveExamDate();
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   const handleSetExamDate = (date: string) => {
-    localStorage.setItem('examDate', date);
+    setEffectiveExamDate(date);
     setExamDate(date);
     setShowDatePicker(false);
   };
@@ -32,11 +36,41 @@ export default function Profile() {
   const daysUntilExam = examDate ? Math.ceil((new Date(examDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : null;
 
   // Lifted Settings Logic
-  const handleClearProgress = () => {
+  const handleClearProgress = async () => {
     if (confirm('Möchtest du wirklich deinen Fortschritt zurücksetzen? Diese Aktion kann nicht rückgängig gemacht werden.')) {
-      localStorage.clear();
-      alert('Fortschritt wurde zurückgesetzt!');
-      window.location.reload();
+      try {
+        if (authUser) {
+          await db.resetUserProgress(authUser.id);
+        }
+
+        // Clear all local progress keys (Guest & Sync cache)
+        const keysToRemove = [
+          'guest_progress',
+          'guest_bookmarks',
+          'guest_completed_lessons',
+          'guest_flashcard_progress',
+          'guest_wrong_counts',
+          'guest_answered_order',
+          'examDate',
+          '34a_lernplan',
+          'answered_order'
+        ];
+
+        // Also clear any expanded sections
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('user_expanded_sections_') || key.startsWith('guest_expanded_sections_')) {
+            keysToRemove.push(key);
+          }
+        });
+
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+
+        alert('Fortschritt wurde zurückgesetzt!');
+        window.location.reload();
+      } catch (error) {
+        console.error('Error resetting progress:', error);
+        alert('Ein Fehler ist aufgetreten. Bitte versuche es später erneut.');
+      }
     }
   };
 
@@ -46,6 +80,7 @@ export default function Profile() {
       <div className="bg-white dark:bg-slate-850 p-6 rounded-[28px] shadow-sm border border-slate-100 dark:border-slate-800 text-center mb-6 relative">
         <button
           onClick={() => navigate('/')}
+          title="Zurück zum Dashboard"
           className="absolute left-6 top-6 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
         >
           <ArrowLeft size={24} />
@@ -53,6 +88,7 @@ export default function Profile() {
         {showLanguageToggle && (
           <button
             onClick={toggleLanguage}
+            title="Sprache wechseln"
             className={`absolute right-6 top-6 p-2 transition-colors ${language === 'DE_AR' ? 'text-blue-500 dark:text-blue-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'}`}
           >
             <Languages size={24} />
@@ -88,6 +124,9 @@ export default function Profile() {
             </div>
 
             {isPremium ? (
+              premiumSource === 'transition' ? (
+                <TransitionAccessNotice variant="profile" />
+              ) : (
               <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-2xl p-4 border border-amber-200 dark:border-amber-800/30">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -138,13 +177,27 @@ export default function Profile() {
                   Abo verwalten
                 </button>
               </div>
+              )
             ) : (
-              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-4">
-                <span className="font-bold text-slate-900 dark:text-white block mb-1">Voller Zugang</span>
-                <p className="text-sm text-slate-600 dark:text-slate-400">Alle Inhalte sind freigeschaltet</p>
-                {language === 'DE_AR' && <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 text-left" dir="rtl">جميع المحتويات متاحة</p>}
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-5 border border-slate-200/50 dark:border-slate-700/30">
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <span className="font-bold text-slate-900 dark:text-white block mb-1 text-lg">Basis Version</span>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Eingeschränkter Zugriff auf Inhalte</p>
+                    {language === 'DE_AR' && <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 text-left" dir="rtl">وصول محدود للمحتوى</p>}
+                  </div>
+
+                  <button
+                    onClick={() => openPaywall('Profile_Status')}
+                    className="w-full bg-gradient-to-br from-amber-500 to-orange-600 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-orange-200/50 dark:hover:shadow-orange-950/20 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+                  >
+                    <Crown size={18} />
+                    <span>Premium freischalten</span>
+                    {language === 'DE_AR' && <span className="text-xs font-normal border-l border-white/20 pl-2" dir="rtl">تفعيل بريميوم</span>}
+                  </button>
+                </div>
               </div>
-        )}
+            )}
       </>
       ) : (
       /* Guest View Login CTA */
@@ -246,6 +299,7 @@ export default function Profile() {
       </div>
       <button
         onClick={() => setShowLanguageToggle(!showLanguageToggle)}
+        title={showLanguageToggle ? "Arabischen Toggle deaktivieren" : "Arabischen Toggle aktivieren"}
         className={`w-12 h-6 rounded-full transition-colors flex items-center px-1 ${showLanguageToggle ? 'bg-blue-600 justify-end' : 'bg-slate-200 dark:bg-slate-700 justify-start'}`}
       >
         <div className="w-4 h-4 bg-white rounded-full shadow-sm"></div>
@@ -330,12 +384,15 @@ export default function Profile() {
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
         <div className="bg-white dark:bg-slate-850 rounded-[24px] p-6 max-w-sm w-full shadow-xl">
           <h3 className="font-bold text-lg text-slate-900 dark:text-white mb-4">Prüfungsdatum eintragen</h3>
-          <input
-            type="date"
-            defaultValue={examDate || ''}
-            onChange={(e) => handleSetExamDate(e.target.value)}
-            className="w-full px-4 py-3 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white bg-white dark:bg-slate-800"
-          />
+            <input
+              type="date"
+              title="Prüfungsdatum wählen"
+              aria-label="Prüfungsdatum"
+              min={new Date().toISOString().split('T')[0]}
+              defaultValue={examDate || ''}
+              onChange={(e) => handleSetExamDate(e.target.value)}
+              className="w-full px-4 py-3 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white bg-white dark:bg-slate-800"
+            />
           <button
             onClick={() => setShowDatePicker(false)}
             className="mt-4 w-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium py-2.5 rounded-2xl hover:bg-slate-200 dark:hover:bg-slate-600"

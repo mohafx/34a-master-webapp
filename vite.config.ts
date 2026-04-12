@@ -30,6 +30,7 @@ export default defineConfig(({ mode, command }) => {
 
   return {
     server: {
+      host: '127.0.0.1',
       port: process.env.PORT ? parseInt(process.env.PORT) : 3000,
       // PostHog Reverse Proxy: umgeht Ad-Blocker in der Entwicklung
       proxy: {
@@ -41,6 +42,11 @@ export default defineConfig(({ mode, command }) => {
       },
     },
     plugins: [react()],
+    optimizeDeps: {
+      // Only scan actual app files — prevents Vite from scanning local_archive/ HTML files
+      // which may be iCloud placeholders and cause ETIMEDOUT errors
+      entries: ['./index.html', './src/**/*.{ts,tsx}'],
+    },
     define: {
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)

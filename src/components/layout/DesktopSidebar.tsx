@@ -13,7 +13,8 @@ import {
     Moon,
     Sun,
     LogIn,
-    Layers
+    Layers,
+    Map
 } from 'lucide-react';
 
 interface NavItem {

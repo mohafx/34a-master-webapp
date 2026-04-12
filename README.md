@@ -1,6 +1,6 @@
 # 34a Master Webapp
 
-Diese App liegt im Workspace bewusst im Unterordner `34a Master Webapp/App src/`.
+Diese App liegt im Workspace bewusst im Unterordner `34a Master Webapp/app-src/`.
 
 ## Orientierung
 

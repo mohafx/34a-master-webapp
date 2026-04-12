@@ -2,15 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../../App';
 import { useDataCache } from '../../contexts/DataCacheContext';
-import { useAuth } from '../../contexts/AuthContext';
 import { usePostHog } from '../../contexts/PostHogProvider';
 
 import { ArrowLeft, BookOpen, ChevronRight, PieChart, Search, X, CheckCircle2, Languages, Lock, Crown } from 'lucide-react';
-import { db } from '../../services/database';
-import { supabase } from '../../lib/supabase';
 import { Card } from '../ui/Card';
 import * as Icons from 'lucide-react';
 import { abbreviateModuleTitle } from '../../utils/moduleUtils';
+import { getCompletedLessonCountForModule, isLessonCompleted } from '../../services/lessonFlow';
 
 // Skeleton component for loading states
 const LessonSkeleton = () => (
@@ -26,9 +24,8 @@ const LessonSkeleton = () => (
 export default function ModuleDetail() {
   const { moduleId } = useParams();
   const navigate = useNavigate();
-  const { language, toggleLanguage, showLanguageToggle, isPremium, openPaywall } = useApp();
-  const { getModuleById, modules, loading: cacheLoading } = useDataCache();
-  const { user: authUser } = useAuth();
+  const { language, toggleLanguage, showLanguageToggle, isPremium, openPaywall, progress: appProgress } = useApp();
+  const { getModuleById, modules, questions, loading: cacheLoading } = useDataCache();
   const { trackEvent } = usePostHog();
 
   // Use cached lessons directly - they contain all metadata needed for the list (id, titles, order)
@@ -36,7 +33,6 @@ export default function ModuleDetail() {
   const module = moduleId ? getModuleById(moduleId) : undefined;
   const lessons = module?.lessons || [];
   const isLoading = cacheLoading || !module;
-  const [completedLessonIds, setCompletedLessonIds] = useState<string[]>([]);
 
   // Track module viewed
   useEffect(() => {
@@ -83,36 +79,14 @@ export default function ModuleDetail() {
     ? modules[currentModuleIndex + 1]
     : undefined;
 
-
-
-  // Removed redundant fetch useEffect
-
-  // Fetch completed lessons
-  useEffect(() => {
-    const fetchCompletion = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        try {
-          const completed = await db.getCompletedLessons(user.id);
-          setCompletedLessonIds(completed);
-        } catch (e) {
-          console.error("Error fetching completed lessons:", e);
-        }
-      } else {
-        // Guest - use localStorage
-        const completed = JSON.parse(localStorage.getItem('guest_completed_lessons') || '[]');
-        setCompletedLessonIds(completed);
-      }
-    };
-    fetchCompletion();
-  }, [lessons]); // Re-fetch when lessons change to ensure accurate count
-
   // No early return for !module to allow header to show immediately
   const m: any = module || {};
 
   // Calculate progress based on actual completion data
-  const answeredCount = lessons.filter(l => completedLessonIds.includes(l.id)).length;
-  const progress = lessons.length > 0 ? (answeredCount / lessons.length) * 100 : 0;
+  const answeredCount = moduleId
+    ? getCompletedLessonCountForModule(moduleId, modules, questions, appProgress)
+    : 0;
+  const completionProgress = lessons.length > 0 ? (answeredCount / lessons.length) * 100 : 0;
 
   return (
     <div className="max-w-4xl mx-auto pt-4 px-4 pb-32 lg:pt-0 lg:pb-8">
@@ -178,13 +152,13 @@ export default function ModuleDetail() {
                 {!module ? (
                   <div className="h-3 w-10 bg-slate-100 dark:bg-slate-800 rounded animate-pulse ml-auto"></div>
                 ) : (
-                  <span className="font-bold text-blue-600 dark:text-blue-400 text-xs ml-auto">{Math.round(progress)}%</span>
+                  <span className="font-bold text-blue-600 dark:text-blue-400 text-xs ml-auto">{Math.round(completionProgress)}%</span>
                 )}
               </div>
               <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden mb-1.5">
                 <div
                   className={`h-full bg-blue-500 transition-all duration-500 ${!module ? 'animate-pulse bg-slate-200 dark:bg-slate-600' : ''}`}
-                  style={{ width: `${!module ? 0 : progress}%` }}
+                  style={{ width: `${!module ? 0 : completionProgress}%` }}
                 />
               </div>
               {!module ? (
@@ -234,7 +208,7 @@ export default function ModuleDetail() {
         {!isLoading && (
           <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-700/50">
             {lessons.map((lesson, index) => {
-              const isComplete = completedLessonIds.includes(lesson.id);
+              const isComplete = isLessonCompleted(lesson.id, questions, appProgress);
               const isFirstLesson = index === 0;
               // All lessons in "Einführung und Grundlagen" module are free
               const isIntroModule = m.title_de === 'Einführung und Grundlagen' || m.titleDE === 'Einführung und Grundlagen';

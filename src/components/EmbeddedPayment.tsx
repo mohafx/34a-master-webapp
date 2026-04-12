@@ -71,7 +71,7 @@ export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentPro
                 clearInterval(pollingIntervalRef.current);
             }
         };
-    }, []);
+    }, [clientSecret]);
 
     // FALLBACK: Poll for payment completion with exponential backoff
     // CRITICAL: Only trigger success if subscription state CHANGED from false to true
@@ -195,5 +195,3 @@ export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentPro
         </div>
     );
 };
-
-

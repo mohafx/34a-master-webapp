@@ -1,0 +1,750 @@
+[
+  {
+    "id": "TC001",
+    "title": "Complete a daily study loop from learning plan to quiz and back with progress updated",
+    "description": "Verifies a learner can start from the learning plan, complete a quiz, and return to the learning plan with updated completion and accuracy shown.",
+    "category": "Lernplan Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /lernplan"
+      },
+      {
+        "type": "action",
+        "description": "Click the suggested next step in today’s learning focus"
+      },
+      {
+        "type": "action",
+        "description": "Select a learning unit to start studying"
+      },
+      {
+        "type": "action",
+        "description": "Select an answer for the current quiz question"
+      },
+      {
+        "type": "action",
+        "description": "Submit the quiz attempt"
+      },
+      {
+        "type": "action",
+        "description": "Navigate back to the learning plan"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify overall progress indicators reflect an update from the completed attempt"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an accuracy or correctness metric is displayed and updated"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Complete an exam and view results with recommended next steps",
+    "description": "Verifies a learner can select an exam type, complete the exam questions in the quiz view, submit, and then see results and recommended next steps.",
+    "category": "Quiz & Exam Selection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /exam"
+      },
+      {
+        "type": "action",
+        "description": "Select an exam type"
+      },
+      {
+        "type": "action",
+        "description": "Start the selected exam"
+      },
+      {
+        "type": "action",
+        "description": "Answer the presented exam questions with valid selections"
+      },
+      {
+        "type": "action",
+        "description": "Submit the exam"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify exam results are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify recommended next steps are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Follow today's learning focus to complete a unit and see progress increment",
+    "description": "Verifies that using the today’s learning focus leads to a study unit and completing it increments progress when returning to the learning plan.",
+    "category": "Lernplan Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /lernplan"
+      },
+      {
+        "type": "action",
+        "description": "Click the today’s learning focus entry"
+      },
+      {
+        "type": "action",
+        "description": "Select the suggested unit to begin"
+      },
+      {
+        "type": "action",
+        "description": "Select an answer for each question in the unit until completion is available"
+      },
+      {
+        "type": "action",
+        "description": "Submit the completed unit"
+      },
+      {
+        "type": "action",
+        "description": "Navigate back to the learning plan"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the suggested next step changes or advances after completion"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify completion percentage for the relevant module increases"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Complete a practice question set and view score and accuracy",
+    "description": "Verifies a learner can complete a practice quiz, submit answers, and see score and accuracy metrics in the results view.",
+    "category": "Quiz & Exam Selection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /quiz"
+      },
+      {
+        "type": "action",
+        "description": "Begin a practice question set"
+      },
+      {
+        "type": "action",
+        "description": "Answer each question with a valid selection"
+      },
+      {
+        "type": "action",
+        "description": "Submit the answers"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a score is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify accuracy metrics are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Complete TikTok qualification and register to reach a personalized dashboard",
+    "description": "Verifies a TikTok lead can complete qualification, view social proof, register, and land on a dashboard personalized by onboarding answers.",
+    "category": "TikTok Onboarding",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /tiktok"
+      },
+      {
+        "type": "action",
+        "description": "Answer the employment qualification questions with valid selections"
+      },
+      {
+        "type": "action",
+        "description": "Continue to the social proof or testimonials step"
+      },
+      {
+        "type": "action",
+        "description": "Proceed to registration from the onboarding flow"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid email into the registration form"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid password into the registration form"
+      },
+      {
+        "type": "action",
+        "description": "Submit the registration form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the user lands on the dashboard"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the dashboard shows a personalized onboarding-based starting state"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Registration validation errors shown and cleared during TikTok onboarding",
+    "description": "Verifies submitting an incomplete registration form shows validation guidance and a corrected resubmission reaches the dashboard.",
+    "category": "TikTok Onboarding",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /tiktok"
+      },
+      {
+        "type": "action",
+        "description": "Proceed through qualification to reach the registration step"
+      },
+      {
+        "type": "action",
+        "description": "Submit the registration form without completing required fields"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify validation errors or guidance are displayed for missing required inputs"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid email into the registration form"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid password into the registration form"
+      },
+      {
+        "type": "action",
+        "description": "Resubmit the registration form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the user lands on the dashboard"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "Exam configuration changes when switching exam type before starting",
+    "description": "Verifies switching between Mini/Written/Simulation changes the exam setup shown and the chosen type is reflected when starting the exam.",
+    "category": "Quiz & Exam Selection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /exam"
+      },
+      {
+        "type": "action",
+        "description": "Select the Mini exam type"
+      },
+      {
+        "type": "action",
+        "description": "Verify the exam configuration details for the selected type are displayed"
+      },
+      {
+        "type": "action",
+        "description": "Select a different exam type"
+      },
+      {
+        "type": "action",
+        "description": "Start the selected exam"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the quiz reflects the newly selected exam format (e.g., structure or timing indicators)"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Navigate from learning plan to module list and open a specific module context",
+    "description": "Verifies a learner can use the learning plan to reach the module list and open a module/unit context without losing the intended study target.",
+    "category": "Lernplan Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /lernplan"
+      },
+      {
+        "type": "action",
+        "description": "Click a module or upcoming item from the learning plan"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to the module list view"
+      },
+      {
+        "type": "action",
+        "description": "Select the module associated with the chosen learning plan item"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the module overview or module detail context is displayed for the selected module"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an option to start or continue studying within the module is available"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "View account and subscription details on profile",
+    "description": "Verifies an authenticated user can access the profile page and see account information and subscription status.",
+    "category": "Profile & Account",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation to open the profile page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify account details are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify subscription status/details are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC010",
+    "title": "Browse modules and start a practice session from a module overview",
+    "description": "Verifies a learner can browse modules, open a module overview, start practice, complete a session, and see progress updated on return.",
+    "category": "Module List & Study",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /learn"
+      },
+      {
+        "type": "action",
+        "description": "Select a module from the module list to open its overview"
+      },
+      {
+        "type": "action",
+        "description": "Start a practice session from the module overview"
+      },
+      {
+        "type": "action",
+        "description": "Select an answer for the current quiz question"
+      },
+      {
+        "type": "action",
+        "description": "Submit the practice session"
+      },
+      {
+        "type": "action",
+        "description": "Navigate back to the module list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the studied module shows updated progress compared to before the session"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a continue or next-step state is available for that module"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC011",
+    "title": "Persist answers while navigating between questions in a quiz",
+    "description": "Verifies selected answers remain saved when moving between questions before submission.",
+    "category": "Quiz & Exam Selection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /quiz"
+      },
+      {
+        "type": "action",
+        "description": "Begin a practice question set"
+      },
+      {
+        "type": "action",
+        "description": "Answer the current question with a valid selection"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to a different question"
+      },
+      {
+        "type": "action",
+        "description": "Navigate back to the previously answered question"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the previously selected answer remains selected"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC012",
+    "title": "Update profile fields and see changes reflected",
+    "description": "Verifies an authenticated user can edit profile fields, save, and see the updated profile reflected on the profile page.",
+    "category": "Profile & Account",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation to open the profile page"
+      },
+      {
+        "type": "action",
+        "description": "Fill updated valid values into editable profile fields"
+      },
+      {
+        "type": "action",
+        "description": "Save profile changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a save confirmation is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the updated profile values are displayed on the profile page"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC013",
+    "title": "Find a topic by filtering/scanning and begin the Introduction unit",
+    "description": "Verifies a learner can locate a topic in the module list and begin the Introduction unit from the module hierarchy.",
+    "category": "Module List & Study",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /learn"
+      },
+      {
+        "type": "action",
+        "description": "Use the available filtering or scanning controls to narrow to a topic"
+      },
+      {
+        "type": "action",
+        "description": "Select a module from the filtered results"
+      },
+      {
+        "type": "action",
+        "description": "Review the module hierarchy sections"
+      },
+      {
+        "type": "action",
+        "description": "Begin the Introduction unit"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the quiz or study view opens for the Introduction unit"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the current unit context indicates the learner is in the module’s Introduction section"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC014",
+    "title": "Learning plan displays meaningful empty or initial state for a new learner",
+    "description": "Verifies that a new or unstarted learner sees an initial/empty state on the learning plan with clear next actions available.",
+    "category": "Lernplan Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /lernplan"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an initial or empty progress state is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a clear call-to-action to start learning or pick a module is available"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC015",
+    "title": "Restarting an exam returns the user to the exam selection flow",
+    "description": "Verifies a learner can exit the current exam attempt and start a new one from the exam selection page.",
+    "category": "Quiz & Exam Selection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /exam"
+      },
+      {
+        "type": "action",
+        "description": "Select an exam type"
+      },
+      {
+        "type": "action",
+        "description": "Start the selected exam"
+      },
+      {
+        "type": "action",
+        "description": "Initiate restarting or leaving the exam attempt via available in-app controls"
+      },
+      {
+        "type": "action",
+        "description": "Select a different exam type"
+      },
+      {
+        "type": "action",
+        "description": "Start the selected exam"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the quiz reflects the newly selected exam format"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC016",
+    "title": "Review social proof in TikTok onboarding and continue the funnel",
+    "description": "Verifies that social proof/testimonials are reachable in the onboarding funnel and the user can continue onward without blockers.",
+    "category": "TikTok Onboarding",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /tiktok"
+      },
+      {
+        "type": "action",
+        "description": "Answer the qualification questions with valid selections"
+      },
+      {
+        "type": "action",
+        "description": "Continue to the social proof or testimonials step"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify social proof or testimonials content is displayed"
+      },
+      {
+        "type": "action",
+        "description": "Continue from social proof to the next step"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the flow advances to a registration or next onboarding step"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC017",
+    "title": "Refresh the learning plan and retain visible progress state",
+    "description": "Verifies that after completing a quiz and returning to the learning plan, a page refresh retains the visible progress state.",
+    "category": "Lernplan Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /lernplan"
+      },
+      {
+        "type": "action",
+        "description": "Click the suggested next step in today’s learning focus"
+      },
+      {
+        "type": "action",
+        "description": "Select a learning unit to start studying"
+      },
+      {
+        "type": "action",
+        "description": "Select an answer for the current quiz question"
+      },
+      {
+        "type": "action",
+        "description": "Submit the quiz attempt"
+      },
+      {
+        "type": "action",
+        "description": "Navigate back to the learning plan"
+      },
+      {
+        "type": "action",
+        "description": "Refresh the page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify progress indicators are still displayed after refresh"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the learning plan still shows a suggested next step"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC018",
+    "title": "Prevent submitting a quiz with required questions unanswered",
+    "description": "Verifies the quiz prevents submission when required questions are incomplete and shows a validation prompt to complete missing answers.",
+    "category": "Quiz & Exam Selection",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /quiz"
+      },
+      {
+        "type": "action",
+        "description": "Begin a practice question set"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to submit without answering at least one required question"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a validation error is visible indicating required answers are missing"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC019",
+    "title": "Correct invalid profile input and save successfully",
+    "description": "Verifies a user can correct invalid inputs after validation errors and then save profile changes successfully.",
+    "category": "Profile & Account",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation to open the profile page"
+      },
+      {
+        "type": "action",
+        "description": "Fill an invalid value into a constrained profile field"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to save profile changes"
+      },
+      {
+        "type": "action",
+        "description": "Fill a valid value into the same profile field"
+      },
+      {
+        "type": "action",
+        "description": "Save profile changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a save confirmation is visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC020",
+    "title": "Show field validation errors for invalid profile input",
+    "description": "Verifies invalid profile edits are rejected with field-level validation errors and do not save.",
+    "category": "Profile & Account",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation to open the profile page"
+      },
+      {
+        "type": "action",
+        "description": "Fill an invalid value into a profile field that has format constraints"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to save profile changes"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify field-level validation errors are visible"
+      }
+    ],
+    "priority": "Low"
+  }
+]

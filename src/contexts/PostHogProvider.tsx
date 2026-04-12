@@ -14,6 +14,14 @@ export type AnalyticsEventName =
     | 'signup_completed'
     | 'user_logged_in'
     | 'user_logged_out'
+    // TikTok Onboarding Events
+    | 'tiktok_onboarding_started'
+    | 'tiktok_employment_answered'
+    | 'tiktok_language_answered'
+    | 'tiktok_qualified'
+    | 'tiktok_not_qualified'
+    | 'tiktok_whatsapp_clicked'
+    | 'tiktok_redirect_to_app'
     // Learning Events
     | 'module_viewed'
     | 'lesson_started'
@@ -22,6 +30,16 @@ export type AnalyticsEventName =
     | 'quiz_started'
     | 'quiz_completed'
     | 'flashcard_rated'
+    | 'lernplan_viewed'
+    | 'lernplan_entry_clicked'
+    | 'lernplan_create_clicked'
+    | 'lernplan_created'
+    | 'lernplan_regenerate_clicked'
+    | 'lernplan_regenerated'
+    | 'lernplan_exam_date_opened'
+    | 'lernplan_exam_date_saved'
+    | 'lernplan_node_opened'
+    | 'lernplan_continue_clicked'
     // Exam Events
     | 'written_exam_started'
     | 'written_exam_completed'
@@ -41,6 +59,8 @@ export type AnalyticsEventName =
     | 'language_toggled'
     | 'onboarding_completed'
     | 'settings_changed'
+    | 'checklist_item_toggled'
+    | 'lesson_completion_toggled'
     // Error Events
     | 'error_occurred'
     // Navigation Events
@@ -54,7 +74,6 @@ export interface AnalyticsEventProperties {
     module_name?: string;
     lesson_id?: string;
     lesson_name?: string;
-    // Question/Flashcard properties
     question_id?: string;
     flashcard_id?: string;
     is_correct?: boolean;
@@ -68,8 +87,25 @@ export interface AnalyticsEventProperties {
     from_language?: string;
     to_language?: string;
     language?: string;
+    level?: string;
+    status?: string;
+    reason?: string | null;
+    employment?: string | null;
+    phone?: string;
     // Bookmark properties
     action?: 'add' | 'remove';
+    completed?: boolean;
+    embedded?: boolean;
+    has_exam_date?: boolean;
+    days_until_exam?: number | null;
+    total_nodes?: number;
+    completed_count?: number;
+    entry_point?: string;
+    node_id?: string;
+    node_status?: string;
+    target_path?: string;
+    item?: string;
+    is_checked?: boolean;
     // User properties
     is_premium?: boolean;
     // Page properties

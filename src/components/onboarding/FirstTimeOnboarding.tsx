@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronRight, Check, FileText, BarChart3, Cloud, LayoutList, Languages, BookOpen } from 'lucide-react';
 import ProgressDots from './ProgressDots';
+import { PaywallView } from '../PaywallView';
+import { getEffectiveExamDate } from '../../utils/appStorage';
+
 
 export interface OnboardingData {
     examDate: string | null;
@@ -14,13 +17,18 @@ interface FirstTimeOnboardingProps {
 }
 
 export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeOnboardingProps) {
+    // Check for existing data from guest Lernplan flow
+    const storedDate = getEffectiveExamDate();
+    const hasExistingPlan = !!localStorage.getItem('34a_lernplan');
+    const shouldSkipDateScreen = !!storedDate || hasExistingPlan;
+
     const [currentScreen, setCurrentScreen] = useState(0);
-    const [examDate, setExamDate] = useState<string>('');
-    const [skipDate, setSkipDate] = useState(false);
+    const [examDate, setExamDate] = useState<string>(storedDate || '');
+    const [skipDate, setSkipDate] = useState(hasExistingPlan && !storedDate);
     const [selectedLanguage, setSelectedLanguage] = useState<'DE' | 'DE_AR'>('DE');
     const [newsletter, setNewsletter] = useState(true);
 
-    const totalScreens = 2;
+    const totalScreens = 3;
 
     // A date is invalid if it's in the past (today counts as past for an exam date)
     const isPastDate = examDate !== '' && new Date(examDate) <= new Date(new Date().setHours(0, 0, 0, 0));
@@ -83,9 +91,10 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
             className="fixed inset-0 z-50 overflow-y-auto bg-white flex flex-col font-sans"
         >
 
-            {/* HEADER CARD */}
-            <div className="mx-4 mt-4 sm:mx-6 sm:mt-6 shrink-0 relative z-20">
-                <div className="bg-[#3B65F5] rounded-[28px] shadow-xl shadow-blue-500/10 overflow-hidden relative">
+            {/* HEADER CARD - Hidden on Paywall screen */}
+            {currentScreen < 2 && (
+                <div className="mx-4 mt-4 sm:mx-6 sm:mt-6 shrink-0 relative z-20 transition-opacity">
+                    <div className="bg-[#3B65F5] rounded-[28px] shadow-xl shadow-blue-500/10 overflow-hidden relative">
 
                     {/* Decorative background elements inside the card */}
                     <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -119,7 +128,7 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
                             </div>
                         )}
 
-                        {/* Screen 2 Title */}
+                        {/* Screen 2 Title (Hidden if Paywall has own header) */}
                         {currentScreen === 1 && (
                             <div className="animate-fadeSlideIn">
                                 <h1 className="text-[26px] sm:text-[32px] leading-[1.1] font-black text-white mb-2 tracking-tight">
@@ -130,13 +139,16 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
                                 </p>
                             </div>
                         )}
+
+                        {/* Screen 3 (Paywall) - We hide the standard header card on screen 2 */}
                     </div>
                 </div>
             </div>
+            )}
 
             {/* BODY CONTENT */}
-            <div className="flex-1 flex flex-col relative z-10 w-full mb-32">
-                <div className="px-6 pt-6 pb-4">
+            <div className={`flex-1 flex flex-col relative z-10 w-full ${currentScreen === 2 ? 'mb-0' : 'mb-32'}`}>
+                <div className={currentScreen === 2 ? 'flex-1' : 'px-6 pt-6 pb-4'}>
 
                     <div className="animate-fadeUp">
 
@@ -145,86 +157,91 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
                             <div className="space-y-6">
                                 
                                 {/* Exam Date Section */}
-                                <div className="space-y-3">
-                                    <h3 className="font-bold text-[17px] text-slate-800">
-                                        Hast du schon einen Prüfungstermin?
-                                    </h3>
-                                    
-                                    {!skipDate && (
-                                        <div className="animate-fadeIn">
-                                            <input
-                                                type="date"
-                                                value={examDate}
-                                                min={new Date(Date.now() + 86400000).toISOString().split('T')[0]}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    const selected = new Date(val);
-                                                    const today = new Date();
-                                                    today.setHours(0, 0, 0, 0);
-                                                    if (val && selected <= today) {
-                                                        // Past date — show error but keep value for display
-                                                        setExamDate(val);
-                                                    } else {
-                                                        setExamDate(val);
-                                                    }
-                                                }}
-                                                className={`w-full px-4 py-3.5 border-2 rounded-2xl focus:outline-none text-slate-900 bg-white font-medium text-[15px] transition-colors ${
-                                                    examDate && new Date(examDate) <= new Date(new Date().setHours(0,0,0,0))
-                                                        ? 'border-red-400 focus:border-red-500'
-                                                        : 'border-slate-200 focus:border-[#3B65F5]'
-                                                }`}
-                                                autoComplete="off"
-                                            />
+                                {!shouldSkipDateScreen && (
+                                    <div className="space-y-3">
+                                        <h3 className="font-bold text-[17px] text-slate-800">
+                                            Wann genau ist dein Prüfungsdatum?
+                                        </h3>
+                                        
+                                        {!skipDate && (
+                                            <div className="animate-fadeIn">
+                                                <input
+                                                    type="date"
+                                                    title="Wann hast du deine Sachkundeprüfung?"
+                                                    aria-label="Prüfungsdatum"
+                                                    value={examDate}
+                                                    min={new Date().toISOString().split('T')[0]}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        const selected = new Date(val);
+                                                        const today = new Date();
+                                                        today.setHours(0, 0, 0, 0);
+                                                        if (val && selected <= today) {
+                                                            // Past date — show error but keep value for display
+                                                            setExamDate(val);
+                                                        } else {
+                                                            setExamDate(val);
+                                                        }
+                                                    }}
+                                                    className={`w-full px-4 py-3.5 border-2 rounded-2xl focus:outline-none text-slate-900 bg-white font-medium text-[15px] transition-colors ${
+                                                        examDate && new Date(examDate) <= new Date(new Date().setHours(0,0,0,0))
+                                                            ? 'border-red-400 focus:border-red-500'
+                                                            : 'border-slate-200 focus:border-[#3B65F5]'
+                                                    }`}
+                                                    autoComplete="off"
+                                                />
 
-                                            {/* Past date error */}
-                                            {examDate && new Date(examDate) <= new Date(new Date().setHours(0,0,0,0)) && (
-                                                <div className="mt-2 bg-red-50 rounded-xl p-3 border border-red-200 animate-fadeIn">
-                                                    <p className="text-red-600 text-[13px] font-semibold text-center">
-                                                        Dieses Datum liegt in der Vergangenheit. Bitte wähle ein zukünftiges Datum.
-                                                    </p>
-                                                </div>
-                                            )}
-                                            
-                                            {/* Future date countdown */}
-                                            {daysUntilExam !== null && daysUntilExam > 0 && (
-                                                <div className="mt-3 bg-blue-50/80 rounded-xl p-3 border border-blue-100 animate-fadeUp">
-                                                    <p className="text-[#3B65F5] text-[14px] font-bold text-center">
-                                                        Noch {daysUntilExam} Tage — gemeinsam schaffen wir das!
-                                                    </p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
+                                                {/* Past date error */}
+                                                {examDate && new Date(examDate) <= new Date(new Date().setHours(0,0,0,0)) && (
+                                                    <div className="mt-2 bg-red-50 rounded-xl p-3 border border-red-200 animate-fadeIn">
+                                                        <p className="text-red-600 text-[13px] font-semibold text-center">
+                                                            Dieses Datum liegt in der Vergangenheit. Bitte wähle ein zukünftiges Datum.
+                                                        </p>
+                                                    </div>
+                                                )}
+                                                
+                                                {/* Future date countdown */}
+                                                {daysUntilExam !== null && daysUntilExam > 0 && (
+                                                    <div className="mt-3 bg-blue-50/80 rounded-xl p-3 border border-blue-100 animate-fadeUp">
+                                                        <p className="text-[#3B65F5] text-[14px] font-bold text-center">
+                                                            Noch {daysUntilExam} Tage — gemeinsam schaffen wir das!
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
 
-                                    {!skipDate && (
-                                        <button 
-                                            onClick={() => {
-                                                setSkipDate(true);
-                                                setExamDate('');
-                                            }}
-                                            className="w-full text-center text-[13px] text-slate-500 font-medium py-2 hover:text-slate-700 active:text-slate-700 underline decoration-slate-300 underline-offset-4"
-                                        >
-                                            Ich weiß mein Datum noch nicht
-                                        </button>
-                                    )}
-
-                                    {skipDate && (
-                                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center justify-between animate-fadeIn">
-                                            <span className="text-slate-600 text-[14px] font-medium">Ohne Datum fortfahren</span>
+                                        {!skipDate && (
                                             <button 
-                                                onClick={() => setSkipDate(false)}
-                                                className="text-[#3B65F5] text-[13px] font-bold py-1 px-3 bg-blue-50 rounded-lg"
+                                                onClick={() => {
+                                                    setSkipDate(true);
+                                                    setExamDate('');
+                                                }}
+                                                className="w-full text-center text-[13px] text-slate-500 font-medium py-2 hover:text-slate-700 active:text-slate-700 underline decoration-slate-300 underline-offset-4"
                                             >
-                                                Ändern
+                                                Ich weiß mein Datum noch nicht
                                             </button>
-                                        </div>
-                                    )}
-                                </div>
+                                        )}
 
-                                <div className="h-px bg-slate-100 w-full my-6"></div>
+                                        {skipDate && (
+                                            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center justify-between animate-fadeIn">
+                                                <span className="text-slate-600 text-[14px] font-medium">Ohne Datum fortfahren</span>
+                                                <button 
+                                                    onClick={() => setSkipDate(false)}
+                                                    className="text-[#3B65F5] text-[13px] font-bold py-1 px-3 bg-blue-50 rounded-lg"
+                                                >
+                                                    Ändern
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
-                                {/* Arabic Toggle Section - Restored from old onboarding */}
-                                <div className="pt-2">
+                                {/* Separator only if we had the date section */}
+                                {!shouldSkipDateScreen && <div className="h-px bg-slate-100 w-full my-6"></div>}
+
+                                {/* Arabic Toggle Section - Spacing adjusted for when it's the only thing on screen */}
+                                <div className={shouldSkipDateScreen ? 'pt-4' : 'pt-2'}>
                                     <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-3">
@@ -259,11 +276,9 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
 
                             </div>
                         )}
-
-                        {/* Screen 2 Content */}
+                        {/* Screen 2 Content (Features) */}
                         {currentScreen === 1 && (
                             <div className="space-y-6">
-                                
                                 {/* Features List Cards */}
                                 <div className="space-y-3">
                                     <FeatureItem icon={FileText} title="Realitätsnahe Simulationen" subtitle="700+ aktuelle Fragen" />
@@ -272,12 +287,23 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
                                 </div>
                             </div>
                         )}
+
+                        {/* Screen 3 Content - Paywall */}
+                        {currentScreen === 2 && (
+                            <div className="animate-fadeUp flex-1 flex flex-col min-h-screen">
+                                <PaywallView 
+                                    isEmbedded={true} 
+                                    onClose={handleStart} 
+                                />
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {/* Fixed Footer Buttons */}
-                <div className="fixed bottom-0 left-0 right-0 px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-6 bg-gradient-to-t from-white via-white to-white/90 z-50 pointer-events-none">
-                    <div className="pointer-events-auto flex flex-col gap-3">
+                {/* Fixed Footer Buttons - Hidden on Paywall screen */}
+                {currentScreen < 2 && (
+                    <div className="fixed bottom-0 left-0 right-0 px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-6 bg-gradient-to-t from-white via-white to-white/90 z-50 pointer-events-none">
+                        <div className="pointer-events-auto flex flex-col gap-3">
                         {/* Newsletter Checkbox integrated with footer on Screen 2 */}
                         {currentScreen === 1 && (
                             <div 
@@ -314,6 +340,7 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
                         </button>
                     </div>
                 </div>
+                )}
             </div>
 
             <style>{`

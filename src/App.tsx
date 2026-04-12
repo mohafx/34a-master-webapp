@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, createContext, useContext, lazy, Suspense } from 'react';
-import { HashRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { AppLanguage, User, UserProgress, Question, UserSettings } from './types';
 import { MOCK_QUESTIONS } from './services/mockData';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -10,6 +10,7 @@ import { PostHogProvider, usePostHog, usePageTracking } from './contexts/PostHog
 import { PaywallDialog } from './components/PaywallDialog';
 import { db, guestStorage } from './services/database';
 import { supabase } from './lib/supabase';
+import { getLessonQuestionProgress, isQuestionBasedLesson } from './services/lessonFlow';
 import SplashScreen from './components/SplashScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import DesktopLayout from './components/layout/DesktopLayout';
@@ -39,7 +40,19 @@ import Widerrufsbelehrung from './components/pages/Widerrufsbelehrung';
 import { AuthDialog } from './components/auth/AuthDialog';
 import { DashboardSkeleton } from './components/skeletons/DashboardSkeleton';
 import CookieConsent from './components/CookieConsent';
+import { TransitionAccessNotice } from './components/TransitionAccessNotice';
 import FirstTimeOnboarding from './components/onboarding/FirstTimeOnboarding';
+import { LocalDevPanel } from './components/devpanel/LocalDevPanel';
+import { DevPanelProvider, useDevPanel } from './devpanel/DevPanelContext';
+import {
+  getEffectiveLanguage,
+  getEffectiveSettings,
+  hasCompletedOnboarding,
+  markOnboardingCompleted,
+  setEffectiveExamDate,
+  setEffectiveLanguage,
+  setEffectiveSettings,
+} from './utils/appStorage';
 
 // Code-split large components - loaded on demand
 
@@ -55,6 +68,8 @@ const FlashcardList = lazy(() => import('./components/pages/FlashcardList'));
 const FlashcardView = lazy(() => import('./components/pages/FlashcardView'));
 // Additional lazy-loaded pages for better performance
 const Statistics = lazy(() => import('./components/pages/Statistics'));
+const Lernplan = lazy(() => import('./components/pages/Lernplan'));
+const TikTokOnboarding = lazy(() => import('./components/onboarding/TikTokOnboarding'));
 
 const WrongAnswersList = lazy(() => import('./components/pages/WrongAnswersList'));
 const BookmarkList = lazy(() => import('./components/pages/BookmarkList'));
@@ -82,11 +97,15 @@ interface AppContextType {
   hideBottomNav: boolean;
   setHideBottomNav: (hide: boolean) => void;
   showAuthDialog: boolean;
+  showPaywallDialog: boolean;
+  showFirstTimeOnboarding: boolean;
   // Premium subscription
   isPremium: boolean;
   isSubscriptionLoading: boolean;
   openPaywall: (featureName?: string) => void;
   openAuthDialog: (mode?: 'login' | 'register', message?: { de: string; ar: string }) => void;
+  toggleLessonCompletion: (lessonId: string) => Promise<void>;
+  setLessonCompletion: (lessonId: string, completed: boolean) => Promise<void>;
   openOnboarding: () => void;
 }
 
@@ -123,10 +142,14 @@ export const useApp = () => {
       hideBottomNav: false,
       setHideBottomNav: () => { },
       showAuthDialog: false,
+      showPaywallDialog: false,
+      showFirstTimeOnboarding: false,
       isPremium: false,
       isSubscriptionLoading: false,
       openPaywall: () => { },
       openAuthDialog: () => { },
+      toggleLessonCompletion: async () => { },
+      setLessonCompletion: async () => { },
       openOnboarding: () => { }
     } as AppContextType;
   }
@@ -136,22 +159,14 @@ export const useApp = () => {
 // --- Main App Component (wrapped with Auth) ---
 function AppContent() {
   const { user: authUser, loading: authLoading, signOut } = useAuth();
-  const { loading: dataLoading, loadingStatus, error: loadingError, refreshData } = useDataCache();
+  const { loading: dataLoading, loadingStatus, error: loadingError, refreshData, questions } = useDataCache();
   const { trackEvent, identifyUser, resetUser, setUserProperties } = usePostHog();
+  const { isOverrideActive, shortcutRequest, consumeShortcut } = useDevPanel();
   usePageTracking(); // Track page views on hash navigation (SPA)
-  const [language, setLanguage] = useState<AppLanguage>(AppLanguage.DE);
+  const [language, setLanguage] = useState<AppLanguage>(() => getEffectiveLanguage());
   const [settings, setSettings] = useState<UserSettings>(() => {
     // Initialize from localStorage to avoid flash of default content
-    const storedSettings = localStorage.getItem('34a_settings');
-    let parsed: UserSettings = {};
-
-    if (storedSettings) {
-      try {
-        parsed = JSON.parse(storedSettings);
-      } catch (e) {
-        console.error('Error parsing settings', e);
-      }
-    }
+    let parsed: UserSettings = getEffectiveSettings();
 
     // Sync legacy toggle setting
     const legacyToggle = localStorage.getItem('34a_show_lang_toggle');
@@ -191,7 +206,6 @@ function AppContent() {
     };
   });
 
-  // Apply Dark Mode effect + Listen for system preference changes
   useEffect(() => {
     // Apply current dark mode setting
     const applyTheme = (isDark: boolean) => {
@@ -214,7 +228,7 @@ function AppContent() {
         // Update settings when system theme changes
         setSettings(prev => {
           const newSettings = { ...prev, darkMode: e.matches };
-          localStorage.setItem('34a_settings', JSON.stringify(newSettings));
+          setEffectiveSettings(newSettings);
           return newSettings;
         });
       };
@@ -223,7 +237,7 @@ function AppContent() {
       if (mediaQuery.matches !== settings.darkMode) {
         setSettings(prev => {
           const newSettings = { ...prev, darkMode: mediaQuery.matches };
-          localStorage.setItem('34a_settings', JSON.stringify(newSettings));
+          setEffectiveSettings(newSettings);
           return newSettings;
         });
       }
@@ -257,27 +271,78 @@ function AppContent() {
   const prevAuthUserRef = React.useRef<typeof authUser>(undefined);
   useEffect(() => {
     if (authLoading) return;
+    if (isOverrideActive) return;
     const prevUser = prevAuthUserRef.current;
     const isNewLogin = !prevUser && authUser; // transitioned from null → logged-in
     if (isNewLogin && authUser) {
-      const flagKey = `34a_onboarding_completed_${authUser.id}`;
-      const alreadyOnboarded = localStorage.getItem(flagKey);
+      const alreadyOnboarded = hasCompletedOnboarding(authUser.id);
       if (!alreadyOnboarded) {
         // Small delay so the app finishes loading before showing onboarding
         setTimeout(() => setShowFirstTimeOnboarding(true), 300);
       }
     }
     prevAuthUserRef.current = authUser;
-  }, [authUser, authLoading]);
+  }, [authUser, authLoading, isOverrideActive]);
 
-  // TEMPORARY: All content is free – paywall disabled
-  const openPaywall = (_featureName?: string) => {
-    return;
+  const openPaywall = (featureName?: string) => {
+    if (isPremium) return; // Already premium — never show paywall
+    if (!authUser) {
+      setPaywallFeatureName(featureName);
+      setPendingAction('open_paywall');
+      setAuthDialogMode('register');
+      setAuthDialogMessage({
+        de: 'Bitte erst anmelden oder registrieren, um Premium-Inhalte freizuschalten.',
+        ar: 'يرجى تسجيل الدخول أو إنشاء حساب أولاً لفتح المحتوى المميز.'
+      });
+      setShowAuthDialog(true);
+      return;
+    }
+    setPaywallFeatureName(featureName);
+    setShowPaywallDialog(true);
   };
 
   const openOnboarding = () => {
     setShowFirstTimeOnboarding(true);
   };
+
+  useEffect(() => {
+    if (!shortcutRequest) return;
+
+    switch (shortcutRequest.id) {
+      case 'onboarding':
+        setShowAuthDialog(false);
+        setShowPaywallDialog(false);
+        setShowFirstTimeOnboarding(true);
+        break;
+      case 'tiktok':
+        window.location.hash = '#/tiktok';
+        break;
+      case 'auth':
+        setAuthDialogMode('register');
+        setAuthDialogMessage(null);
+        setShowAuthDialog(true);
+        break;
+      case 'paywall':
+        setPaywallFeatureName('Dev-Shortcut');
+        setShowPaywallDialog(true);
+        break;
+      case 'lernplan':
+        localStorage.setItem('34a_dashboard_mode', 'lernplan');
+        window.location.hash = '#/';
+        break;
+    }
+
+    consumeShortcut();
+  }, [shortcutRequest, consumeShortcut]);
+
+  useEffect(() => {
+    if (!isOverrideActive) return;
+
+    setShowAuthDialog(false);
+    setShowPaywallDialog(false);
+    setAuthDialogMessage(null);
+    setPendingAction(null);
+  }, [isOverrideActive, authUser]);
 
   // Convert Supabase auth user to app User type
   const user: User | null = authUser ? {
@@ -305,7 +370,7 @@ function AppContent() {
               const newSettings = { ...prev, ...profile.settings };
 
               // Also sync back to local storage to keep it fresh
-              localStorage.setItem('34a_settings', JSON.stringify(newSettings));
+              setEffectiveSettings(newSettings);
 
               return newSettings;
             });
@@ -344,7 +409,7 @@ function AppContent() {
     setSettings(updated);
 
     // ALWAYS save to localStorage (serves as cache/offline fallback)
-    localStorage.setItem('34a_settings', JSON.stringify(updated));
+    setEffectiveSettings(updated);
 
     // If logged in, ALSO save to DB
     if (authUser) {
@@ -358,13 +423,12 @@ function AppContent() {
 
   // Load language from localStorage
   useEffect(() => {
-    const storedLang = localStorage.getItem('34a_lang');
-    if (storedLang) setLanguage(storedLang as AppLanguage);
+    setLanguage(getEffectiveLanguage());
   }, []);
 
   // Save language to localStorage
   useEffect(() => {
-    localStorage.setItem('34a_lang', language);
+    setEffectiveLanguage(language);
   }, [language]);
 
   // Load toggle setting (Legacy support removed/merged)
@@ -474,14 +538,22 @@ function AppContent() {
   };
 
   const answerQuestion = async (questionId: string, isCorrect: boolean) => {
+    const nextAnsweredQuestions = {
+      ...progress.answeredQuestions,
+      [questionId]: isCorrect,
+    };
+
     // Optimistic update: Update UI immediately
     setProgress(prev => ({
       ...prev,
-      answeredQuestions: {
-        ...prev.answeredQuestions,
-        [questionId]: isCorrect
-      }
+      answeredQuestions: nextAnsweredQuestions
     }));
+
+    // Track analytics event
+    trackEvent('question_answered', {
+      question_id: questionId,
+      is_correct: isCorrect
+    });
 
     // Track order of answered questions (for both logged-in and guest users)
     const answeredOrder = JSON.parse(localStorage.getItem('answered_order') || '[]');
@@ -489,12 +561,6 @@ function AppContent() {
       answeredOrder.push(questionId);
       localStorage.setItem('answered_order', JSON.stringify(answeredOrder));
     }
-
-    // Track analytics event
-    trackEvent('question_answered', {
-      question_id: questionId,
-      is_correct: isCorrect
-    });
 
     if (authUser) {
       // Save to Supabase for logged-in users
@@ -507,6 +573,22 @@ function AppContent() {
     } else {
       // Save to localStorage for guests
       guestStorage.saveProgress(questionId, isCorrect);
+    }
+
+    const currentQuestion = questions.find(question => question.id === questionId);
+    if (currentQuestion?.lessonId && isQuestionBasedLesson(currentQuestion.lessonId, questions)) {
+      const lessonProgress = getLessonQuestionProgress(currentQuestion.lessonId, questions, {
+        ...progress,
+        answeredQuestions: nextAnsweredQuestions,
+      });
+
+      if (lessonProgress.allAnswered) {
+        try {
+          await setLessonCompletion(currentQuestion.lessonId, true);
+        } catch (error) {
+          console.error('Error syncing lesson completion:', error);
+        }
+      }
     }
   };
 
@@ -593,6 +675,45 @@ function AppContent() {
     }
   };
 
+  const setLessonCompletion = async (lessonId: string, completed: boolean) => {
+    const isCurrentlyCompleted = progress.completedLessons[lessonId] === true;
+    if (isCurrentlyCompleted === completed) return;
+
+    setProgress(prev => ({
+      ...prev,
+      completedLessons: {
+        ...prev.completedLessons,
+        [lessonId]: completed,
+      }
+    }));
+
+    trackEvent('lesson_completion_toggled', {
+      lesson_id: lessonId,
+      completed,
+    });
+
+    try {
+      if (authUser) {
+        await db.setLessonCompletion(authUser.id, lessonId, completed);
+      } else {
+        guestStorage.setLessonCompletion(lessonId, completed);
+      }
+    } catch (error) {
+      console.error('Error setting lesson completion:', error);
+      setProgress(prev => ({
+        ...prev,
+        completedLessons: {
+          ...prev.completedLessons,
+          [lessonId]: isCurrentlyCompleted,
+        }
+      }));
+      throw error;
+    }
+  };
+
+  const toggleLessonCompletion = async (lessonId: string) => {
+    await setLessonCompletion(lessonId, !(progress.completedLessons[lessonId] === true));
+  };
 
   // Show splash screen while auth or data is loading
   const [showSlowLoadingMessage, setShowSlowLoadingMessage] = useState(false);
@@ -655,14 +776,14 @@ function AppContent() {
         onComplete={async (data) => {
           // Handle Exam Date
           if (data.examDate) {
-            localStorage.setItem('examDate', data.examDate);
+            setEffectiveExamDate(data.examDate);
             // We only save to local storage for now without an explicit user row update in Supabase
           }
 
           // Handle Language
           if (data.language) {
             setLanguage(data.language === 'DE_AR' ? AppLanguage.DE_AR : AppLanguage.DE);
-            localStorage.setItem('34a_lang', data.language);
+            setEffectiveLanguage(data.language === 'DE_AR' ? AppLanguage.DE_AR : AppLanguage.DE);
           }
 
           // Handle Newsletter
@@ -676,7 +797,7 @@ function AppContent() {
 
           // Mark onboarding completed
           if (authUser) {
-            localStorage.setItem(`34a_onboarding_completed_${authUser.id}`, 'true');
+            markOnboardingCompleted(authUser.id);
           }
 
           // Track onboarding completion
@@ -697,8 +818,8 @@ function AppContent() {
 
   return (
     <ErrorBoundary>
-      <AppContext.Provider value={{
-        user, settings, updateSettings, language, progress, toggleLanguage, logout: signOut, answerQuestion, answerFlashcard, toggleBookmark, showLanguageToggle: settings.showLanguageToggle ?? true, setShowLanguageToggle: (show: boolean) => updateSettings({ showLanguageToggle: show }), hideBottomNav, setHideBottomNav, showAuthDialog, isPremium, isSubscriptionLoading: subscriptionLoading, openPaywall, openOnboarding,
+    <AppContext.Provider value={{
+        user, settings, updateSettings, language, progress, toggleLanguage, logout, answerQuestion, answerFlashcard, toggleBookmark, toggleLessonCompletion, setLessonCompletion, showLanguageToggle: settings.showLanguageToggle ?? true, setShowLanguageToggle: (show: boolean) => updateSettings({ showLanguageToggle: show }), hideBottomNav, setHideBottomNav, showAuthDialog, showPaywallDialog, showFirstTimeOnboarding, isPremium, isSubscriptionLoading: subscriptionLoading, openPaywall, openOnboarding,
         openAuthDialog: (mode = 'register', message) => {
           setAuthDialogMode(mode);
           setAuthDialogMessage(message || null);
@@ -735,6 +856,7 @@ function AppContent() {
                     <Route path="/written-exam" element={<WrittenExam />} />
                     <Route path="/written-exam/results/:sessionId" element={<WrittenExamResults />} />
                     <Route path="/statistics" element={<Statistics />} />
+                    <Route path="/lernplan" element={<Navigate to="/" replace />} />
 
                     <Route path="/flashcards" element={<FlashcardSelection />} />
                     <Route path="/flashcards/:moduleId" element={<FlashcardList />} />
@@ -751,6 +873,7 @@ function AppContent() {
                     <Route path="/admin/written-exam" element={<AdminGuard><AdminWrittenExamBrowser /></AdminGuard>} />
                     <Route path="/admin/written-exam/:topic" element={<AdminGuard><AdminWrittenExamQuestionList /></AdminGuard>} />
                     <Route path="/admin/written-exam/:topic/question" element={<AdminGuard><AdminWrittenExamQuiz /></AdminGuard>} />
+                    <Route path="/tiktok" element={<TikTokOnboarding />} />
                     <Route path="*" element={<Dashboard />} />
                   </Routes>
                 </Suspense>
@@ -771,10 +894,20 @@ function AppContent() {
               />
             )}
 
-            {/* Global Paywall Dialog – disabled: all content is free */}
+            {/* Global Paywall Dialog */}
+            {showPaywallDialog && (
+              <PaywallDialog
+                onClose={() => {
+                  setShowPaywallDialog(false);
+                }}
+                featureName={paywallFeatureName}
+              />
+            )}
 
             {/* Cookie Consent Banner */}
+            <TransitionAccessNotice variant="controller" />
             <CookieConsent />
+            <LocalDevPanel />
           </div>
         </HashRouter>
       </AppContext.Provider>
@@ -830,15 +963,17 @@ export default function App() {
   return (
     <ErrorBoundary>
       <PostHogProvider>
-        <AuthProvider>
-          <ToastProvider>
-            <SubscriptionProvider>
-              <DataCacheProvider>
-                <AppContent />
-              </DataCacheProvider>
-            </SubscriptionProvider>
-          </ToastProvider>
-        </AuthProvider>
+        <DevPanelProvider>
+          <AuthProvider>
+            <ToastProvider>
+              <SubscriptionProvider>
+                <DataCacheProvider>
+                  <AppContent />
+                </DataCacheProvider>
+              </SubscriptionProvider>
+            </ToastProvider>
+          </AuthProvider>
+        </DevPanelProvider>
       </PostHogProvider>
     </ErrorBoundary>
   );
