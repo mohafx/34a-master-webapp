@@ -128,7 +128,7 @@ export interface WrittenExamSession {
 
 // Topic distribution constants for full exam (82 questions)
 export const TOPIC_DISTRIBUTION = {
-  'Recht der öffentlichen Sicherheit und Ordnung': 7,
+  'Öffentliche Sicherheit und Ordnung': 7,
   'Gewerberecht': 5,
   'Datenschutz': 5,
   'BGB': 13,
@@ -141,7 +141,7 @@ export const TOPIC_DISTRIBUTION = {
 
 // Topic distribution for mini exam (16 questions) - proportional to full exam
 export const MINI_EXAM_TOPIC_DISTRIBUTION = {
-  'Recht der öffentlichen Sicherheit und Ordnung': 1,
+  'Öffentliche Sicherheit und Ordnung': 1,
   'Gewerberecht': 1,
   'Datenschutz': 1,
   'BGB': 3,

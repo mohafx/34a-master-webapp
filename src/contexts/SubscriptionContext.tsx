@@ -319,7 +319,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }
 
     if (!user) {
-      console.error('User must be logged in to checkout');
+      console.error('User must be logged in to use openCheckout');
       return null;
     }
 
@@ -336,13 +336,11 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.error('Edge function error:', error);
-        // Extract error details from data if available (Supabase often returns error details in data)
         const errorDetails = data?.error || data?.details || JSON.stringify(data) || 'No details';
         const enhancedError = new Error(`Server Error: ${error.message} | Backend: ${errorDetails}`);
         throw enhancedError;
       }
 
-      // Even if no error, check if data contains an error field (for non-2xx responses that return JSON)
       if (data?.error) {
         console.error('Backend returned error:', data);
         throw new Error(`Backend Error: ${data.error} | Details: ${data.details || data.stack || 'none'}`);
@@ -353,11 +351,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         throw new Error('No client secret returned from server');
       }
 
-      // Track checkout started
-      trackEvent('checkout_started', {
-        plan: plan,
-        price: 49
-      });
+      trackEvent('checkout_started', { plan: plan, price: 49 });
 
       console.log('Got clientSecret, length:', data.clientSecret?.length);
       return data.clientSecret;
@@ -371,6 +365,12 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const processPaymentSuccess = async () => {
     if (isOverrideActive) {
       toast.success('Premium ist im Dev-Panel lokal aktiv.');
+      return;
+    }
+
+    // Guest checkout: user is not yet logged in — handled by GuestPaymentSuccess page
+    if (!user) {
+      toast.success('Zahlung erfolgreich! Prüfe deine E-Mail, um dein Konto zu aktivieren.');
       return;
     }
 

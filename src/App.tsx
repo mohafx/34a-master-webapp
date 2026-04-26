@@ -69,10 +69,16 @@ const FlashcardView = lazy(() => import('./components/pages/FlashcardView'));
 // Additional lazy-loaded pages for better performance
 const Statistics = lazy(() => import('./components/pages/Statistics'));
 const Lernplan = lazy(() => import('./components/pages/Lernplan'));
-const TikTokOnboarding = lazy(() => import('./components/onboarding/TikTokOnboarding'));
-
+const ForderungFunnel = lazy(() => import('./components/onboarding/ForderungFunnel'));
+const TikTokFunnel = lazy(() => import('./components/onboarding/TikTokFunnel'));
+const TikTokTestLoading = lazy(() => import('./components/onboarding/TikTokTestLoading'));
+const TikTokTest = lazy(() => import('./components/onboarding/TikTokTest'));
+const TikTokTestResult = lazy(() => import('./components/onboarding/TikTokTestResult'));
+const TikTokResultLoading = lazy(() => import('./components/onboarding/TikTokResultLoading'));
 const WrongAnswersList = lazy(() => import('./components/pages/WrongAnswersList'));
 const BookmarkList = lazy(() => import('./components/pages/BookmarkList'));
+const CompleteRegistration = lazy(() => import('./components/pages/CompleteRegistration'));
+const GuestPaymentSuccess = lazy(() => import('./components/pages/GuestPaymentSuccess'));
 // Admin
 const AdminDashboard = lazy(() => import('./components/pages/admin/AdminDashboard'));
 const AdminGuard = lazy(() => import('./components/pages/admin/AdminGuard'));
@@ -286,17 +292,6 @@ function AppContent() {
 
   const openPaywall = (featureName?: string) => {
     if (isPremium) return; // Already premium — never show paywall
-    if (!authUser) {
-      setPaywallFeatureName(featureName);
-      setPendingAction('open_paywall');
-      setAuthDialogMode('register');
-      setAuthDialogMessage({
-        de: 'Bitte erst anmelden oder registrieren, um Premium-Inhalte freizuschalten.',
-        ar: 'يرجى تسجيل الدخول أو إنشاء حساب أولاً لفتح المحتوى المميز.'
-      });
-      setShowAuthDialog(true);
-      return;
-    }
     setPaywallFeatureName(featureName);
     setShowPaywallDialog(true);
   };
@@ -313,9 +308,6 @@ function AppContent() {
         setShowAuthDialog(false);
         setShowPaywallDialog(false);
         setShowFirstTimeOnboarding(true);
-        break;
-      case 'tiktok':
-        window.location.hash = '#/tiktok';
         break;
       case 'auth':
         setAuthDialogMode('register');
@@ -864,6 +856,8 @@ function AppContent() {
 
                     <Route path="/email-confirmation" element={<EmailConfirmation />} />
                     <Route path="/reset-password" element={<ResetPassword />} />
+                    <Route path="/complete-registration" element={<Suspense fallback={<SplashScreen />}><CompleteRegistration /></Suspense>} />
+                    <Route path="/guest-payment-success" element={<Suspense fallback={<SplashScreen />}><GuestPaymentSuccess /></Suspense>} />
                     <Route path="/auth/callback" element={<AuthCallback />} />
                     <Route path="/impressum" element={<Impressum />} />
                     <Route path="/datenschutz" element={<Datenschutz />} />
@@ -873,7 +867,12 @@ function AppContent() {
                     <Route path="/admin/written-exam" element={<AdminGuard><AdminWrittenExamBrowser /></AdminGuard>} />
                     <Route path="/admin/written-exam/:topic" element={<AdminGuard><AdminWrittenExamQuestionList /></AdminGuard>} />
                     <Route path="/admin/written-exam/:topic/question" element={<AdminGuard><AdminWrittenExamQuiz /></AdminGuard>} />
-                    <Route path="/tiktok" element={<TikTokOnboarding />} />
+                    <Route path="/forderung" element={<ForderungFunnel />} />
+                    <Route path="/tiktok" element={<TikTokFunnel />} />
+                    <Route path="/tiktok/loading" element={<Suspense fallback={<DashboardSkeleton />}><TikTokTestLoading /></Suspense>} />
+                    <Route path="/tiktok/test" element={<Suspense fallback={<DashboardSkeleton />}><TikTokTest /></Suspense>} />
+                    <Route path="/tiktok/analyzing" element={<Suspense fallback={<DashboardSkeleton />}><TikTokResultLoading /></Suspense>} />
+                    <Route path="/tiktok/result" element={<Suspense fallback={<DashboardSkeleton />}><TikTokTestResult /></Suspense>} />
                     <Route path="*" element={<Dashboard />} />
                   </Routes>
                 </Suspense>
@@ -907,7 +906,7 @@ function AppContent() {
             {/* Cookie Consent Banner */}
             <TransitionAccessNotice variant="controller" />
             <CookieConsent />
-            <LocalDevPanel />
+            {/* <LocalDevPanel /> */}
           </div>
         </HashRouter>
       </AppContext.Provider>

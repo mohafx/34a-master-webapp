@@ -7,7 +7,7 @@ import { WrittenExamQuestion, WrittenExamSession, TOPIC_DISTRIBUTION, MINI_EXAM_
 import { CheckCircle, XCircle, Trophy, RotateCcw, ChevronLeft, ChevronRight, AlertCircle, Share2, Clock, ChevronDown, ChevronUp, BarChart3, ListChecks, Languages } from 'lucide-react';
 
 const TOPIC_TRANSLATIONS: Record<string, string> = {
-  'Recht der öffentlichen Sicherheit und Ordnung': 'قانون الأمن والنظام العام',
+  'Öffentliche Sicherheit und Ordnung': 'قانون الأمن والنظام العام',
   'Gewerberecht': 'القانون التجاري',
   'Datenschutz': 'حماية البيانات',
   'BGB': 'القانون المدني (BGB)',
@@ -565,7 +565,7 @@ export default function WrittenExamResults() {
 
                         // Short abbreviations for each topic with dots where appropriate
                         const abbreviations: Record<string, string> = {
-                          'Recht der öffentlichen Sicherheit und Ordnung': 'Öff. Recht',
+                          'Öffentliche Sicherheit und Ordnung': 'Öff. Recht',
                           'Gewerberecht': 'Gewerbe.',
                           'Datenschutz': 'Daten.',
                           'BGB': 'BGB',

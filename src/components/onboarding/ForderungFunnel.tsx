@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import ProgressDots from './ProgressDots';
 import { usePostHog } from '../../contexts/PostHogProvider';
 
-export default function TikTokOnboarding() {
+export default function ForderungFunnel() {
     const navigate = useNavigate();
     const { trackEvent } = usePostHog();
     const [currentScreen, setCurrentScreen] = useState(0);
@@ -443,10 +443,6 @@ export default function TikTokOnboarding() {
                             </button>
                         )}
                         
-                        {/* Im Screen 1+2 geht der User automatisch weiter beim Klick auf die Karten, 
-                            daher brauchen wir keinen Weiter-Button, oder wir könnten einen deaktivierten anzeigen.
-                            Aber "automatischer" Weitergang (bzw. via handleSelect) ist flüssiger. */}
-                        
                         {currentScreen === 3 && isQualified && (
                             <button
                                 onClick={handleWhatsAppClick}
@@ -483,11 +479,6 @@ export default function TikTokOnboarding() {
           from { opacity: 0; }
           to { opacity: 1; }
         }
-        @keyframes marquee-left {
-          0% { transform: translateX(0%); }
-          100% { transform: translateX(-33.3333%); }
-        }
-        @keyframes marquee-right {
         .animate-fadeSlideIn { animation: fadeSlideIn 0.5s ease-out forwards; }
         .animate-fadeUp { animation: fadeUp 0.5s ease-out forwards; }
         .animate-fadeIn { animation: fadeIn 0.3s ease-out forwards; }

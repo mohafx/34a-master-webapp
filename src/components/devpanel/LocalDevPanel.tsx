@@ -16,7 +16,7 @@ const shortcuts: Array<{
   label: string;
 }> = [
   { id: 'onboarding', label: 'Erst-Onboarding öffnen' },
-  { id: 'tiktok', label: 'TikTok-Onboarding öffnen' },
+  { id: 'tiktok', label: 'TikTok-Funnel öffnen' },
   { id: 'auth', label: 'Auth öffnen' },
   { id: 'paywall', label: 'Paywall öffnen' },
   { id: 'lernplan', label: 'Lernplan öffnen' },

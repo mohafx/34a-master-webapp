@@ -14,8 +14,8 @@ export default function DesktopLayout({ children }: DesktopLayoutProps) {
     // Pages where sidebar should be hidden even on desktop
     const hideSidebarRoutes = [
         '/written-exam',
-
         '/quiz',
+        '/forderung',
     ];
 
     const shouldHideSidebar = hideSidebarRoutes.some(route =>

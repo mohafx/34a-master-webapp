@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { CalendarDays, LayoutGrid, Map, Pencil } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { CalendarDays, LayoutGrid, Map } from 'lucide-react';
 import { useApp } from '../../App';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDataCache } from '../../contexts/DataCacheContext';
@@ -18,13 +18,14 @@ type DashboardMode = 'freestyle' | 'lernplan';
 const DASHBOARD_MODE_STORAGE_KEY = '34a_dashboard_mode';
 
 function loadInitialDashboardMode(): DashboardMode {
-  if (typeof window === 'undefined') return 'lernplan';
+  if (typeof window === 'undefined') return 'freestyle';
   const stored = localStorage.getItem(DASHBOARD_MODE_STORAGE_KEY);
-  return stored === 'freestyle' ? 'freestyle' : 'lernplan';
+  return stored === 'lernplan' ? 'lernplan' : 'freestyle';
 }
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toggleLanguage, showLanguageToggle, setHideBottomNav, progress, language } = useApp();
   const { user } = useAuth();
   const { questions: cachedQuestions, modules } = useDataCache();
@@ -35,6 +36,18 @@ export default function Dashboard() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dashboardMode, setDashboardMode] = useState<DashboardMode>(loadInitialDashboardMode);
   const [examDate, setExamDate] = useState<string | null>(() => getEffectiveExamDate());
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const authAction = params.get('auth');
+    if (authAction === 'login' || authAction === 'register') {
+      if (!user) {
+        setShowAuthDialog(true);
+      }
+      // Remove the param from URL to avoid reopening on refresh
+      navigate(location.pathname, { replace: true });
+    }
+  }, [location, user, navigate]);
 
   useEffect(() => {
     localStorage.setItem(DASHBOARD_MODE_STORAGE_KEY, dashboardMode);
@@ -307,20 +320,20 @@ function DashboardModeToggle({
       <div className="relative grid grid-cols-2 rounded-[20px] bg-slate-100/80 dark:bg-slate-800/80 p-1">
         <div
           className="absolute top-1 bottom-1 left-1 w-[calc(50%-0.25rem)] rounded-[16px] bg-gradient-to-r from-[#3B65F5] to-[#2551E8] shadow-lg shadow-blue-500/20 transition-transform duration-300 ease-out"
-          style={{ transform: mode === 'lernplan' ? 'translateX(0%)' : 'translateX(100%)' }}
+          style={{ transform: mode === 'freestyle' ? 'translateX(0%)' : 'translateX(100%)' }}
         />
 
-        <ToggleButton
-          active={mode === 'lernplan'}
-          icon={Map}
-          label="Lernplan"
-          onClick={() => onChange('lernplan')}
-        />
         <ToggleButton
           active={mode === 'freestyle'}
           icon={LayoutGrid}
           label="Freestyle"
           onClick={() => onChange('freestyle')}
+        />
+        <ToggleButton
+          active={mode === 'lernplan'}
+          icon={Map}
+          label="Lernplan"
+          onClick={() => onChange('lernplan')}
         />
       </div>
     </div>

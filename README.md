@@ -30,9 +30,12 @@ scripts/                      Betriebs- und Pipeline-Skripte
 ## Schnellstart
 
 ```bash
+export PATH="/opt/homebrew/opt/node@22/bin:$PATH"
 npm install
 npm run dev
 ```
+
+Die App erwartet lokal Node.js 22 und npm 10. Das ist zusätzlich über `.nvmrc`, `engines` und `volta` im Projekt hinterlegt.
 
 ## Wichtige Befehle
 

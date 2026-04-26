@@ -1,7 +1,7 @@
 import { supabase } from './lib/supabase';
 
 export const checkModuleData = async () => {
-    // 1. Get the module ID for "Recht der öffentlichen Sicherheit und Ordnung"
+    // 1. Get the module ID for "Öffentliche Sicherheit und Ordnung"
     const { data: modules } = await supabase
         .from('modules')
         .select('id, title_de')

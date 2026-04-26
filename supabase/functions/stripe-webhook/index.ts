@@ -260,6 +260,28 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
             currentPeriodEnd: expiresAt,
         });
         console.log(`[webhook] One-time payment recorded for user ${userId}`);
+
+        // Send recovery email for guest checkout users so they can set a password
+        if (session.metadata?.guest_checkout === 'true' && session.customer_email) {
+            try {
+                const siteUrl = Deno.env.get("SITE_URL") || "https://34a-master.app";
+                const { error: recoveryError } = await supabaseAdmin.auth.admin.generateLink({
+                    type: 'recovery',
+                    email: session.customer_email,
+                    options: {
+                        redirectTo: `${siteUrl}/#/complete-registration`,
+                    }
+                });
+                if (recoveryError) {
+                    console.error(`[webhook] Failed to send recovery email to ${session.customer_email}:`, recoveryError);
+                } else {
+                    console.log(`[webhook] Recovery email sent to ${session.customer_email} for guest checkout`);
+                }
+            } catch (emailErr: any) {
+                // Non-fatal — payment was still successful
+                console.error(`[webhook] Error sending recovery email:`, emailErr?.message);
+            }
+        }
         return;
     }
 
