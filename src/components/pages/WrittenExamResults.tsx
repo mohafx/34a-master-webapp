@@ -853,8 +853,10 @@ export default function WrittenExamResults() {
               )}
 
               <div className="space-y-2">
-                {(['A', 'B', 'C', 'D'] as const).map((key) => {
+                {(Object.keys(currentQuestion.answers) as Array<keyof typeof currentQuestion.answers>).map((key) => {
                   const answer = currentQuestion.answers[key];
+                  if (!answer) return null;
+
                   const answerText = answer.de;
                   const answerTextAR = answer.ar;
                   const isCorrect = currentQuestion.correctAnswer.includes(key);
