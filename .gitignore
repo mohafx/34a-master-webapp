@@ -97,3 +97,9 @@ supabase/.temp/
 
 # Local cleanup archive
 local_archive/
+
+# Videos / large media
+*.mp4
+*.mov
+*.avi
+public/Videos/
