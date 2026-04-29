@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../App';
+import { useAuth } from '../../contexts/AuthContext';
 import { useDataCache } from '../../contexts/DataCacheContext';
 import { usePostHog } from '../../contexts/PostHogProvider';
+import { db } from '../../services/database';
 import {
   AlertCircle,
   ArrowLeft,
@@ -40,6 +42,7 @@ function formatMinutes(minutes: number): string {
 export default function Lernplan({ embedded = false, active = true }: { embedded?: boolean; active?: boolean }) {
   const navigate = useNavigate();
   const { language, progress, showLanguageToggle, toggleLanguage, setHideBottomNav, user, openAuthDialog } = useApp();
+  const { user: authUser } = useAuth();
   const { modules, questions } = useDataCache();
   const { trackEvent } = usePostHog();
   const showArabic = language === 'DE_AR';
@@ -56,8 +59,33 @@ export default function Lernplan({ embedded = false, active = true }: { embedded
   const [guestPlan, setGuestPlan] = useState<StoredLernplan | null>(null);
 
   useEffect(() => {
-    setPlan(user ? loadValidLernplan() : null);
-  }, [user, examDate]);
+    let cancelled = false;
+
+    const loadPlan = async () => {
+      if (!user || !authUser) {
+        setPlan(null);
+        return;
+      }
+
+      try {
+        const activeDbPlan = await db.getActiveUserLernplan(authUser.id);
+        if (!cancelled) {
+          setPlan(activeDbPlan || loadValidLernplan());
+        }
+      } catch (error) {
+        console.error('[Lernplan] Active DB Lernplan could not be loaded:', error);
+        if (!cancelled) {
+          setPlan(loadValidLernplan());
+        }
+      }
+    };
+
+    loadPlan();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, authUser, examDate]);
 
   const lernplanData: LernplanWithStatus = useMemo(() => {
     if (!plan) {

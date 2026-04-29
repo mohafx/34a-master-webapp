@@ -11,6 +11,71 @@ const corsHeaders = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const supabaseAdmin = createClient(
+    Deno.env.get("SUPABASE_URL") ?? "",
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+async function capturePostHog(event: string, distinctId: string | undefined, properties: Record<string, unknown> = {}) {
+    const apiKey = Deno.env.get("POSTHOG_PROJECT_API_KEY");
+    const host = (Deno.env.get("POSTHOG_HOST") || "").replace(/\/$/, "");
+    if (!apiKey || !host) return;
+
+    try {
+        await fetch(`${host}/capture/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                api_key: apiKey,
+                event,
+                distinct_id: distinctId || "server",
+                properties: {
+                    funnel: "tiktok_pruefungscheck",
+                    funnel_version: "2026-04-29",
+                    source: "verify_checkout",
+                    ...properties,
+                },
+            }),
+        });
+    } catch (error) {
+        console.error(`[posthog] Failed to capture ${event}:`, error);
+    }
+}
+
+async function activateTikTokLernplan(tiktokLernplanId: string | undefined, userId: string | undefined): Promise<void> {
+    if (!tiktokLernplanId || !userId) return;
+
+    const { data, error } = await supabaseAdmin
+        .from('user_lernplans')
+        .update({
+            status: 'active',
+            activated_at: new Date().toISOString(),
+        })
+        .eq('id', tiktokLernplanId)
+        .eq('user_id', userId)
+        .select('id,status,test_score,test_total,weak_topics')
+        .maybeSingle();
+
+    if (error) {
+        console.error(`[verify-checkout] Failed to activate TikTok Lernplan ${tiktokLernplanId}:`, error);
+        await capturePostHog("tiktok_plan_activation_failed", userId, {
+            tiktok_lernplan_id: tiktokLernplanId,
+            plan_status: "activation_failed",
+            error_message: error.message,
+        });
+        return;
+    }
+
+    await capturePostHog("tiktok_plan_activated", userId, {
+        tiktok_lernplan_id: tiktokLernplanId,
+        plan_status: data?.status || "active",
+        test_score: data?.test_score ?? null,
+        test_total: data?.test_total ?? null,
+        weak_topic_count: Array.isArray(data?.weak_topics) ? data.weak_topics.length : 0,
+    });
+}
+
 /**
  * Verifies a Stripe Checkout Session and returns its actual status.
  * This is used to prevent false success on Klarna cancel.
@@ -43,6 +108,26 @@ serve(async (req) => {
         const isSuccess =
             session.status === 'complete' &&
             session.payment_status === 'paid';
+
+        if (isSuccess) {
+            await capturePostHog("tiktok_payment_succeeded_server", session.client_reference_id || session.metadata?.user_id, {
+                tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+                checkout_session_id: session.id,
+                payment_status: session.payment_status,
+                plan_status: "payment_succeeded",
+            });
+            await activateTikTokLernplan(
+                session.metadata?.tiktok_lernplan_id,
+                session.client_reference_id || session.metadata?.user_id,
+            );
+        } else if (session.metadata?.tiktok_lernplan_id) {
+            await capturePostHog("tiktok_payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
+                tiktok_lernplan_id: session.metadata.tiktok_lernplan_id,
+                checkout_session_id: session.id,
+                payment_status: session.payment_status,
+                plan_status: "pending_payment",
+            });
+        }
 
         // Get subscription status if exists
         let subscriptionStatus = null;

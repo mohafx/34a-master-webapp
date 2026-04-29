@@ -139,6 +139,22 @@ export const TOPIC_DISTRIBUTION = {
   'DGUV': 8
 } as const;
 
+export const FULL_EXAM_TOPIC_POINT_DISTRIBUTION = {
+  'Öffentliche Sicherheit und Ordnung': { questions: 7, points: 11, single: 3, multiple: 4 },
+  'Gewerberecht': { questions: 5, points: 8, single: 2, multiple: 3 },
+  'Datenschutz': { questions: 5, points: 8, single: 2, multiple: 3 },
+  'BGB': { questions: 13, points: 21, single: 5, multiple: 8 },
+  'Strafrecht': { questions: 13, points: 21, single: 5, multiple: 8 },
+  'Umgang mit Menschen': { questions: 19, points: 19, single: 19, multiple: 0 },
+  'Waffenrecht': { questions: 5, points: 8, single: 2, multiple: 3 },
+  'Sicherheitstechnik': { questions: 7, points: 11, single: 3, multiple: 4 },
+  'DGUV': { questions: 8, points: 13, single: 3, multiple: 5 }
+} as const;
+
+export const FULL_EXAM_TOTAL_QUESTIONS = 82;
+export const FULL_EXAM_TOTAL_POINTS = 120;
+export const FULL_EXAM_PASSING_POINTS = 60;
+
 // Topic distribution for mini exam (16 questions) - proportional to full exam
 export const MINI_EXAM_TOPIC_DISTRIBUTION = {
   'Öffentliche Sicherheit und Ordnung': 1,

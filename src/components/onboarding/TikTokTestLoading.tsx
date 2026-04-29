@@ -1,18 +1,20 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../App';
-import { Loader2, ShieldCheck, Sparkles } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { usePostHog } from '../../contexts/PostHogProvider';
+import { getTikTokAnalyticsContext } from '../../utils/tiktokAnalytics';
 
 const LOADING_TEXTS = [
-    { de: 'Deine Prüfung wird vorbereitet...', ar: 'يتم التحضير لامتحانك...' },
-    { de: 'Sicherheitsexperte in Ausbildung...', ar: 'خبير أمن قيد التدريب...' },
-    { de: 'Fragen werden für dich optimiert...', ar: 'يتم تحسين الأسئلة من أجلك...' },
-    { de: 'Gleich geht es los!', ar: 'سوف نبدأ قريباً!' }
+    { de: 'Prüfungsfragen werden geladen...', ar: 'يتم تحميل أسئلة الامتحان...' },
+    { de: 'Gleich siehst du, wo du stehst.', ar: 'بعد قليل سترى مستواك الحقيقي.' },
+    { de: 'Typische IHK-Fallen werden vorbereitet...', ar: 'يتم تجهيز أسئلة من فخاخ IHK الشائعة...' }
 ];
 
 export default function TikTokTestLoading() {
     const navigate = useNavigate();
     const { language } = useApp();
+    const { trackEvent } = usePostHog();
     const isAr = language === 'DE_AR';
     
     const [textIndex, setTextIndex] = useState(0);
@@ -21,6 +23,11 @@ export default function TikTokTestLoading() {
 
     // Fetch questions in the background
     useEffect(() => {
+        const loadingStartedAt = Date.now();
+        trackEvent('tiktok_questions_loading_started', getTikTokAnalyticsContext('questions_loading', language, {
+            topics_requested_count: 9,
+        }));
+
         const fetchQuestions = async () => {
             try {
                 const { db } = await import('../../services/database');
@@ -40,17 +47,27 @@ export default function TikTokTestLoading() {
                 const results = await Promise.all(promises);
                 const questions = results.map(res => res[0]).filter(Boolean);
                 questionsRef.current = questions;
+                trackEvent('tiktok_questions_loading_completed', getTikTokAnalyticsContext('questions_loading', language, {
+                    duration_ms: Date.now() - loadingStartedAt,
+                    questions_loaded_count: questions.length,
+                    topics_requested_count: topics.length,
+                }));
             } catch (error) {
                 console.error("Failed to fetch questions:", error);
+                trackEvent('tiktok_questions_loading_failed', getTikTokAnalyticsContext('questions_loading', language, {
+                    duration_ms: Date.now() - loadingStartedAt,
+                    topics_requested_count: 9,
+                    error_message: error instanceof Error ? error.message : 'unknown_error',
+                }));
             }
         };
         fetchQuestions();
-    }, []);
+    }, [language, trackEvent]);
 
-    // Timer for navigation (Total 5 seconds)
+    // Timer for navigation (Total 3 seconds)
     useEffect(() => {
         const startTime = Date.now();
-        const duration = 5000;
+        const duration = 3000;
 
         const interval = setInterval(() => {
             const elapsed = Date.now() - startTime;
@@ -66,7 +83,7 @@ export default function TikTokTestLoading() {
         // Text cycling interval
         const textInterval = setInterval(() => {
             setTextIndex(prev => (prev + 1) % LOADING_TEXTS.length);
-        }, 1250);
+        }, 1000);
 
         return () => {
             clearInterval(interval);

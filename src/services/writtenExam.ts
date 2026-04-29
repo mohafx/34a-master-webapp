@@ -1,89 +1,43 @@
 import { db } from './database';
-import { WrittenExamQuestion, TOPIC_DISTRIBUTION, MINI_EXAM_TOPIC_DISTRIBUTION, WrittenExamTopic } from '../types';
+import {
+    FULL_EXAM_TOPIC_POINT_DISTRIBUTION,
+    FULL_EXAM_TOTAL_QUESTIONS,
+    WrittenExamQuestion,
+    MINI_EXAM_TOPIC_DISTRIBUTION
+} from '../types';
+import { getQuestionMaxPoints, scoreQuestionPoints } from '../utils/writtenExamAnswers';
 
 /**
- * Generates 82 random exam questions according to topic distribution
- * Questions are grouped by topic (not shuffled across topics)
- * 60% Single Choice (49 questions), 40% Multiple Choice (33 questions)
+ * Generates 82 random exam questions according to the official 120-point distribution.
+ * Questions are grouped by topic and selected by question type.
  * @returns Array of question IDs sorted by topic
  */
 export async function generateExamQuestions(): Promise<string[]> {
     const allQuestionIds: string[] = [];
 
-    // Target distribution: 60% Single Choice, 40% Multiple Choice
-    const TOTAL_QUESTIONS = 82;
-    const SINGLE_CHOICE_TARGET = Math.round(TOTAL_QUESTIONS * 0.6); // 49
-    const MULTIPLE_CHOICE_TARGET = TOTAL_QUESTIONS - SINGLE_CHOICE_TARGET; // 33
-
-    let singleChoiceCount = 0;
-    let multipleChoiceCount = 0;
-
-    // First, collect all questions by topic and type
-    const questionsByTopic: Record<string, {
-        single: WrittenExamQuestion[];
-        multiple: WrittenExamQuestion[];
-    }> = {};
-
-    for (const [topic] of Object.entries(TOPIC_DISTRIBUTION)) {
+    for (const [topic, config] of Object.entries(FULL_EXAM_TOPIC_POINT_DISTRIBUTION)) {
         const questions = await db.getWrittenExamQuestionsByTopic(topic, 1000);
-        const single = questions.filter(q => !q.correctAnswer.includes(','));
-        const multiple = questions.filter(q => q.correctAnswer.includes(','));
-        questionsByTopic[topic] = { single, multiple };
-    }
+        const single = questions.filter(q => getQuestionMaxPoints(q.correctAnswer) === 1);
+        const multiple = questions.filter(q => getQuestionMaxPoints(q.correctAnswer) === 2);
 
-    // Now select questions for each topic with 60/40 distribution
-    for (const [topic, count] of Object.entries(TOPIC_DISTRIBUTION)) {
-        const { single, multiple } = questionsByTopic[topic];
-
-        // Calculate remaining needs
-        const remainingSingleNeeded = SINGLE_CHOICE_TARGET - singleChoiceCount;
-        const remainingMultipleNeeded = MULTIPLE_CHOICE_TARGET - multipleChoiceCount;
-        const remainingTotalNeeded = TOTAL_QUESTIONS - allQuestionIds.length;
-
-        // Calculate how many of each type for this topic (roughly 60/40)
-        let topicSingleCount = Math.round(count * 0.6);
-        let topicMultipleCount = count - topicSingleCount;
-
-        // Adjust based on remaining needs
-        if (remainingSingleNeeded < topicSingleCount) {
-            topicSingleCount = Math.max(0, remainingSingleNeeded);
-            topicMultipleCount = count - topicSingleCount;
-        }
-        if (remainingMultipleNeeded < topicMultipleCount) {
-            topicMultipleCount = Math.max(0, remainingMultipleNeeded);
-            topicSingleCount = count - topicMultipleCount;
+        if (single.length < config.single || multiple.length < config.multiple) {
+            throw new Error(
+                `Not enough questions for ${topic}. ` +
+                `Need ${config.single} single and ${config.multiple} multiple, ` +
+                `but found ${single.length} single and ${multiple.length} multiple.`
+            );
         }
 
-        // Ensure we don't exceed available questions
-        topicSingleCount = Math.min(topicSingleCount, single.length);
-        topicMultipleCount = Math.min(topicMultipleCount, multiple.length);
-
-        // If we need more, adjust
-        const totalSelected = topicSingleCount + topicMultipleCount;
-        if (totalSelected < count) {
-            // Fill remaining with available type
-            if (single.length > topicSingleCount) {
-                topicSingleCount = Math.min(count, single.length);
-                topicMultipleCount = count - topicSingleCount;
-            } else if (multiple.length > topicMultipleCount) {
-                topicMultipleCount = Math.min(count, multiple.length);
-                topicSingleCount = count - topicMultipleCount;
-            }
-        }
-
-        // Select and shuffle within topic
-        const selectedSingle = single.slice(0, topicSingleCount);
-        const selectedMultiple = multiple.slice(0, topicMultipleCount);
+        const selectedSingle = single.sort(() => Math.random() - 0.5).slice(0, config.single);
+        const selectedMultiple = multiple.sort(() => Math.random() - 0.5).slice(0, config.multiple);
         const selectedQuestions = [...selectedSingle, ...selectedMultiple].sort(() => Math.random() - 0.5);
 
         allQuestionIds.push(...selectedQuestions.map(q => q.id));
-        singleChoiceCount += topicSingleCount;
-        multipleChoiceCount += topicMultipleCount;
     }
 
-    if (allQuestionIds.length !== 82) {
+    if (allQuestionIds.length !== FULL_EXAM_TOTAL_QUESTIONS) {
         throw new Error(
-            `Expected 82 questions but got ${allQuestionIds.length}. Check topic distribution.`
+            `Expected ${FULL_EXAM_TOTAL_QUESTIONS} questions but got ${allQuestionIds.length}. Check topic distribution.`
         );
     }
 
@@ -165,26 +119,48 @@ export function calculateScore(
     return correctCount;
 }
 
+export function calculateExamPoints(
+    questions: WrittenExamQuestion[],
+    userAnswers: Record<string, string>
+): number {
+    return questions.reduce((sum, question) => {
+        return sum + scoreQuestionPoints(question.correctAnswer, userAnswers[question.id]);
+    }, 0);
+}
+
+export function calculateMaxPoints(questions: WrittenExamQuestion[]): number {
+    return questions.reduce((sum, question) => sum + getQuestionMaxPoints(question.correctAnswer), 0);
+}
+
 /**
  * Validates that enough questions exist in the database for each topic
  * @returns Object with validation results
  */
 export async function validateQuestionAvailability(): Promise<{
     valid: boolean;
-    topics: Record<string, { required: number; available: number; valid: boolean }>;
+    topics: Record<string, { required: number; available: number; valid: boolean; requiredSingle?: number; requiredMultiple?: number; availableSingle?: number; availableMultiple?: number }>;
 }> {
-    const topics: Record<string, { required: number; available: number; valid: boolean }> = {};
+    const topics: Record<string, { required: number; available: number; valid: boolean; requiredSingle?: number; requiredMultiple?: number; availableSingle?: number; availableMultiple?: number }> = {};
 
-    for (const [topic, required] of Object.entries(TOPIC_DISTRIBUTION)) {
+    for (const [topic, config] of Object.entries(FULL_EXAM_TOPIC_POINT_DISTRIBUTION)) {
         try {
-            // Get all questions for this topic (with a high limit)
             const questions = await db.getWrittenExamQuestionsByTopic(topic, 1000);
             const available = questions.length;
-            const valid = available >= required;
+            const availableSingle = questions.filter(q => getQuestionMaxPoints(q.correctAnswer) === 1).length;
+            const availableMultiple = questions.filter(q => getQuestionMaxPoints(q.correctAnswer) === 2).length;
+            const valid = available >= config.questions && availableSingle >= config.single && availableMultiple >= config.multiple;
 
-            topics[topic] = { required, available, valid };
+            topics[topic] = {
+                required: config.questions,
+                available,
+                valid,
+                requiredSingle: config.single,
+                requiredMultiple: config.multiple,
+                availableSingle,
+                availableMultiple
+            };
         } catch (error) {
-            topics[topic] = { required, available: 0, valid: false };
+            topics[topic] = { required: config.questions, available: 0, valid: false };
         }
     }
 
@@ -192,4 +168,3 @@ export async function validateQuestionAvailability(): Promise<{
 
     return { valid, topics };
 }
-

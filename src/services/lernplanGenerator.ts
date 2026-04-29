@@ -108,6 +108,17 @@ export interface LernplanWithStatus {
   totalCount: number;
 }
 
+export interface GenerateLernplanOptions {
+  save?: boolean;
+}
+
+export interface TikTokLernplanNodeMeta {
+  previewLessons?: string[];
+  isWeakTopicReview?: boolean;
+}
+
+export type TikTokLernplanNode = LernplanNode & TikTokLernplanNodeMeta;
+
 // ============================================================
 // STORAGE
 // ============================================================
@@ -510,6 +521,7 @@ export function buildLernplanSections(
 export function generateLernplan(
   modules: Module[],
   questions: Question[],
+  options: GenerateLernplanOptions = {},
 ): Lernplan {
   const examDate = localStorage.getItem('examDate') || null;
   const daysRemaining = getDaysRemaining(examDate);
@@ -609,7 +621,186 @@ export function generateLernplan(
     nodes,
   };
 
-  saveLernplan(plan);
+  if (options.save !== false) {
+    saveLernplan(plan);
+  }
+
+  return plan;
+}
+
+function normalizeTopicLabel(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function findNodeForWeakTopic(nodes: LernplanNode[], topic: string): LernplanNode | null {
+  const normalizedTopic = normalizeTopicLabel(topic);
+  const aliases: Record<string, string[]> = {
+    bgb: ['bgb', 'buergerlichesgesetzbuch', 'zivilrecht'],
+    dguv: ['dguv', 'unfallverhuetung', 'unfallverhuetungsvorschriften'],
+    datenschutz: ['datenschutz', 'datenschutzrecht'],
+    gewerberecht: ['gewerberecht', 'gewo', 'bewachungsgewerbe'],
+    waffenrecht: ['waffenrecht', 'waffen'],
+    strafrecht: ['strafrecht', 'strafgesetzbuch'],
+    umgangmitmenschen: ['umgangmitmenschen', 'kommunikation', 'deeskalation'],
+    sicherheitstechnik: ['sicherheitstechnik'],
+    oeffentlichesicherheitundordnung: ['oeffentlichesicherheitundordnung', 'oeffentlichesicherheit', 'ordnung'],
+  };
+  const searchTerms = aliases[normalizedTopic] || [normalizedTopic];
+
+  return nodes.find(node => {
+    const haystack = normalizeTopicLabel(`${node.moduleTitle} ${node.moduleDescription || ''}`);
+    return searchTerms.some(term => haystack.includes(term) || term.includes(haystack));
+  }) || null;
+}
+
+function getModuleLessonTitles(module: Module | undefined, fallbackTitle: string, startIndex: number): string[] {
+  const lessonTitles = sortLessons(module?.lessons || []).map(lesson => lesson.titleDE).filter(Boolean);
+  if (lessonTitles.length === 0) return [fallbackTitle];
+
+  const first = lessonTitles[startIndex % lessonTitles.length];
+  const second = lessonTitles[(startIndex + 1) % lessonTitles.length];
+  return first === second ? [first] : [first, second];
+}
+
+function buildDailyTikTokNode(
+  baseNode: LernplanNode,
+  module: Module | undefined,
+  date: Date,
+  dayIndex: number,
+  lessonStartIndex: number,
+  questionTarget: number,
+  isReview = false,
+): TikTokLernplanNode {
+  const dateLabel = formatDate(date);
+  const previewLessons = isReview
+    ? [`Fehler aus ${baseNode.moduleTitle} wiederholen`, 'IHK-Fallen und Begriffe sichern']
+    : getModuleLessonTitles(module, baseNode.moduleTitle, lessonStartIndex);
+  const lessonCount = previewLessons.length;
+
+  return {
+    ...baseNode,
+    id: `tiktok-day-${dayIndex + 1}-${baseNode.moduleId}${isReview ? '-review' : ''}`,
+    weekLabel: dateLabel,
+    dateRange: dateLabel,
+    estimatedMinutes: (lessonCount * 3) + questionTarget,
+    previewLessons,
+    isWeakTopicReview: isReview,
+    tasks: [
+      {
+        type: 'lessons',
+        label: `${lessonCount} ${lessonCount === 1 ? 'Lektion' : 'Lektionen'} ansehen: ${previewLessons.join(' + ')}`,
+        labelAR: `مشاهدة ${lessonCount} ${lessonCount === 1 ? 'درس' : 'دروس'}`,
+        target: lessonCount,
+        moduleId: baseNode.moduleId,
+      },
+      {
+        type: 'questions',
+        label: `${questionTarget} Fragen beantworten`,
+        labelAR: `الإجابة على ${questionTarget} سؤالاً`,
+        target: questionTarget,
+        moduleId: baseNode.moduleId,
+      },
+    ],
+  };
+}
+
+export function generateTikTokLernplan(
+  modules: Module[],
+  questions: Question[],
+  weakTopics: string[],
+  options: GenerateLernplanOptions = {},
+): Lernplan {
+  const basePlan = generateLernplan(modules, questions, { save: false });
+  const moduleNodes = basePlan.nodes.filter(node => node.moduleId !== 'exam');
+  const examNode = basePlan.nodes.find(node => node.moduleId === 'exam');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const nodes: TikTokLernplanNode[] = [];
+  const usedReviewModuleIds = new Set<string>();
+  const lessonOffsets = new Map<string, number>();
+
+  const pushModuleDay = (baseNode: LernplanNode, dayIndex: number, isReview = false) => {
+    const module = modules.find(item => item.id === baseNode.moduleId);
+    const offset = lessonOffsets.get(baseNode.moduleId) || 0;
+    const questionTarget = isReview ? 25 : 10;
+    nodes.push(buildDailyTikTokNode(
+      baseNode,
+      module,
+      addDays(today, dayIndex),
+      dayIndex,
+      offset,
+      questionTarget,
+      isReview,
+    ));
+    lessonOffsets.set(baseNode.moduleId, offset + 2);
+  };
+
+  moduleNodes.slice(0, 10).forEach((node, index) => {
+    pushModuleDay(node, index, false);
+  });
+
+  const reviewNodes = weakTopics
+    .map(topic => findNodeForWeakTopic(moduleNodes, topic))
+    .filter((node): node is LernplanNode => Boolean(node))
+    .filter(node => {
+      if (usedReviewModuleIds.has(node.moduleId)) return false;
+      usedReviewModuleIds.add(node.moduleId);
+      return true;
+    });
+
+  while (nodes.length < 13) {
+    const reviewIndex = nodes.length - moduleNodes.slice(0, 10).length;
+    const node = reviewNodes[reviewIndex] || moduleNodes[(nodes.length) % Math.max(moduleNodes.length, 1)];
+    if (!node) break;
+    pushModuleDay(node, nodes.length, true);
+  }
+
+  if (examNode) {
+    nodes.push({
+      ...examNode,
+      id: 'tiktok-day-14-exam',
+      weekLabel: formatDate(addDays(today, 13)),
+      dateRange: formatDate(addDays(today, 13)),
+      estimatedMinutes: 90,
+      previewLessons: ['Prüfungssimulation unter Zeitdruck', 'Falsche Antworten gezielt wiederholen'],
+      tasks: [
+        {
+          type: 'exam',
+          label: 'Prüfungssimulation durchführen',
+          labelAR: 'إجراء محاكاة الامتحان',
+          target: 1,
+        },
+        {
+          type: 'questions',
+          label: 'Finale Wiederholung mit 60 Fragen',
+          labelAR: 'مراجعة نهائية مع 60 سؤالاً',
+          target: 60,
+          moduleId: 'exam',
+        },
+      ],
+    });
+  }
+
+  const plan: Lernplan = {
+    ...basePlan,
+    generatedAt: new Date().toISOString(),
+    examDate: null,
+    isDated: true,
+    intensity: 'intensive',
+    nodes: nodes.slice(0, 14),
+  };
+
+  if (options.save !== false) {
+    saveLernplan(plan);
+  }
+
   return plan;
 }
 

@@ -25,6 +25,10 @@ export interface Subscription {
 
 type PremiumSource = 'stripe' | 'transition' | 'dev' | 'test' | null;
 
+interface CheckoutOptions {
+  tiktokPlanPayload?: unknown;
+}
+
 interface SubscriptionContextType {
   subscription: Subscription | null;
   transitionGrant: AccessGrant | null;
@@ -35,7 +39,7 @@ interface SubscriptionContextType {
   refreshSubscription: () => Promise<void>;
   restorePurchases: () => Promise<void>;
   manageSubscription: () => Promise<void>;
-  openCheckout: (plan: '6months') => Promise<string | null>;
+  openCheckout: (plan: '6months', options?: CheckoutOptions) => Promise<string | null>;
   processPaymentSuccess: () => Promise<void>;
   markTransitionNotice: (stage: TransitionNoticeStage) => Promise<void>;
   transitionNoticeReplayNonce: number;
@@ -312,7 +316,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const openCheckout = async (plan: '6months') => {
+  const openCheckout = async (plan: '6months', options: CheckoutOptions = {}) => {
     if (isOverrideActive) {
       toast.info(`Checkout für ${plan} wird im Dev-Panel nicht echt gestartet.`);
       return null;
@@ -328,7 +332,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: {
-          priceId: plan
+          priceId: plan,
+          tiktokPlanPayload: options.tiktokPlanPayload,
         }
       });
 
@@ -351,7 +356,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         throw new Error('No client secret returned from server');
       }
 
-      trackEvent('checkout_started', { plan: plan, price: 49 });
+      trackEvent('checkout_started', { plan: plan, price: 49, has_tiktok_plan: Boolean(options.tiktokPlanPayload) });
 
       console.log('Got clientSecret, length:', data.clientSecret?.length);
       return data.clientSecret;

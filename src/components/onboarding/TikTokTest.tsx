@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../../App';
-import { ArrowLeft, ChevronRight, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { ArrowLeft, ChevronRight, CheckCircle2, Clock } from 'lucide-react';
 import { WrittenExamQuestion } from '../../types';
 import { usePostHog } from '../../contexts/PostHogProvider';
+import { getRequiredAnswerCount } from '../../utils/writtenExamAnswers';
+import { getTikTokAnalyticsContext } from '../../utils/tiktokAnalytics';
+
+const QUESTION_TIME_SECONDS = 90;
 
 export default function TikTokTest() {
     const { language, toggleLanguage } = useApp();
@@ -16,17 +20,39 @@ export default function TikTokTest() {
     
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string[]>>({});
-    const [timeLeft, setTimeLeft] = useState(15 * 60);
+    const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_SECONDS);
+    const questionStartedAtRef = useRef(Date.now());
+    const completedRef = useRef(false);
 
     // Timer logic
     useEffect(() => {
+        if (!questions || questions.length === 0) return;
+
         if (timeLeft <= 0) {
-            handleComplete();
+            const question = questions[currentIndex];
+            const selections = selectedAnswers[question.id] || [];
+            trackEvent('tiktok_question_timeout', getTikTokAnalyticsContext('test', language, {
+                question_id: question.id,
+                question_index: currentIndex + 1,
+                total_questions: questions.length,
+                topic: question.topic,
+                selected_count: selections.length,
+                time_spent_seconds: QUESTION_TIME_SECONDS,
+                time_left_seconds: 0,
+            }));
+            if (currentIndex < questions.length - 1) {
+                setCurrentIndex(prev => prev + 1);
+                setTimeLeft(QUESTION_TIME_SECONDS);
+                questionStartedAtRef.current = Date.now();
+            } else {
+                handleComplete('timeout');
+            }
             return;
         }
+
         const timer = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
         return () => clearInterval(timer);
-    }, [timeLeft]);
+    }, [timeLeft, currentIndex, questions]);
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
@@ -39,35 +65,74 @@ export default function TikTokTest() {
         if (!questions || questions.length === 0) {
             navigate('/tiktok');
         } else {
-            trackEvent('tiktok_test_started', { total_questions: questions.length });
+            trackEvent('tiktok_test_started', getTikTokAnalyticsContext('test', language, {
+                total_questions: questions.length,
+                question_time_seconds: QUESTION_TIME_SECONDS,
+            }));
         }
-    }, [questions, navigate, trackEvent]);
+    }, [questions, navigate, trackEvent, language]);
 
     if (!questions || questions.length === 0) return null;
 
     const currentQuestion = questions[currentIndex];
     const isMultipleChoice = currentQuestion.correctAnswer.includes(',');
     const currentSelections = selectedAnswers[currentQuestion.id] || [];
+    const requiredAnswerCount = getRequiredAnswerCount(currentQuestion.correctAnswer);
+
+    useEffect(() => {
+        questionStartedAtRef.current = Date.now();
+        trackEvent('tiktok_question_viewed', getTikTokAnalyticsContext('test', language, {
+            question_id: currentQuestion.id,
+            question_index: currentIndex + 1,
+            total_questions: questions.length,
+            topic: currentQuestion.topic,
+            answer_count: Object.values(currentQuestion.answers).filter(Boolean).length,
+            required_answer_count: requiredAnswerCount,
+            is_multiple_choice: isMultipleChoice,
+        }));
+    }, [currentQuestion.id, currentIndex, questions.length, language, trackEvent, requiredAnswerCount, isMultipleChoice]);
 
     const handleSelectAnswer = (key: string) => {
         const newSelections = [...currentSelections];
+        const previousSelectedCount = newSelections.length;
         if (newSelections.includes(key)) {
             newSelections.splice(newSelections.indexOf(key), 1);
         } else {
             if (!isMultipleChoice) {
                 newSelections.length = 0; 
+            } else if (newSelections.length >= requiredAnswerCount) {
+                return;
             }
             newSelections.push(key);
         }
+        const sortedSelections = newSelections.sort();
         
         setSelectedAnswers({
             ...selectedAnswers,
-            [currentQuestion.id]: newSelections.sort()
+            [currentQuestion.id]: sortedSelections
         });
+
+        trackEvent(previousSelectedCount > 0 ? 'tiktok_answer_changed' : 'tiktok_answer_selected', getTikTokAnalyticsContext('test', language, {
+            question_id: currentQuestion.id,
+            question_index: currentIndex + 1,
+            total_questions: questions.length,
+            topic: currentQuestion.topic,
+            selected_count: sortedSelections.length,
+            required_answer_count: requiredAnswerCount,
+            is_multiple_choice: isMultipleChoice,
+            time_spent_seconds: Math.round((Date.now() - questionStartedAtRef.current) / 1000),
+            time_left_seconds: timeLeft,
+        }));
     };
 
-    const handleComplete = () => {
-        trackEvent('tiktok_test_completed', { reason: timeLeft <= 0 ? 'timeout' : 'manual' });
+    const handleComplete = (reason: 'manual' | 'timeout' = 'manual') => {
+        if (completedRef.current) return;
+        completedRef.current = true;
+        trackEvent('tiktok_test_completed', getTikTokAnalyticsContext('test', language, {
+            reason,
+            total_questions: questions.length,
+            answered_questions: Object.keys(selectedAnswers).length,
+        }));
         navigate('/tiktok/analyzing', { 
             state: { 
                 questions, 
@@ -77,10 +142,24 @@ export default function TikTokTest() {
     };
 
     const handleNext = () => {
+        trackEvent('tiktok_question_next_clicked', getTikTokAnalyticsContext('test', language, {
+            question_id: currentQuestion.id,
+            question_index: currentIndex + 1,
+            total_questions: questions.length,
+            topic: currentQuestion.topic,
+            selected_count: currentSelections.length,
+            required_answer_count: requiredAnswerCount,
+            is_multiple_choice: isMultipleChoice,
+            time_spent_seconds: Math.round((Date.now() - questionStartedAtRef.current) / 1000),
+            time_left_seconds: timeLeft,
+            is_last_question: currentIndex === questions.length - 1,
+        }));
         if (currentIndex < questions.length - 1) {
             setCurrentIndex(currentIndex + 1);
+            setTimeLeft(QUESTION_TIME_SECONDS);
+            questionStartedAtRef.current = Date.now();
         } else {
-            handleComplete();
+            handleComplete('manual');
         }
     };
 
@@ -155,12 +234,32 @@ export default function TikTokTest() {
                         {isMultipleChoice && (
                             <div className="flex flex-col gap-1.5 items-start">
                                 <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-bold">
-                                    Wähle {currentQuestion.correctAnswer.split(',').length} Antworten
+                                    Wähle {requiredAnswerCount} Antworten
                                 </div>
                                 {isAr && (
                                     <div dir="rtl" className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[9px] font-bold">
-                                        اختر {currentQuestion.correctAnswer.split(',').length === 2 ? 'إجابتين' : `${currentQuestion.correctAnswer.split(',').length} إجابات`}
+                                        اختر {requiredAnswerCount === 2 ? 'إجابتين' : `${requiredAnswerCount} إجابات`}
                                     </div>
+                                )}
+                            </div>
+                        )}
+                        {currentIndex === 3 && (
+                            <div className="rounded-2xl bg-blue-50 px-4 py-3 text-[12px] font-black leading-snug text-blue-700">
+                                Du bist schon bei 33%. Dein Ergebnis wird genauer.
+                                {isAr && (
+                                    <span dir="rtl" className="block text-[11px] text-blue-500 mt-1 animate-reveal">
+                                        وصلت بالفعل إلى 33%. نتيجتك تصبح أدق.
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                        {currentIndex === 6 && (
+                            <div className="rounded-2xl bg-blue-50 px-4 py-3 text-[12px] font-black leading-snug text-blue-700">
+                                Nur noch 3 Fragen. Danach bekommst du deine Auswertung.
+                                {isAr && (
+                                    <span dir="rtl" className="block text-[11px] text-blue-500 mt-1 animate-reveal">
+                                        بقيت 3 أسئلة فقط. بعدها تحصل على تقييمك.
+                                    </span>
                                 )}
                             </div>
                         )}
@@ -220,7 +319,7 @@ export default function TikTokTest() {
                                 : 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
                         }`}
                     >
-                        <span>{currentIndex < questions.length - 1 ? 'Nächste Frage' : 'Test abschließen'}</span>
+                        <span>{currentIndex < questions.length - 1 ? 'Weiter' : 'Ergebnis anzeigen'}</span>
                         <ChevronRight className="w-5 h-5" strokeWidth={3} />
                     </button>
                 </div>

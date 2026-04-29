@@ -14,6 +14,32 @@ const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 // Use Service Role to bypass RLS when updating subscriptions
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
+async function capturePostHog(event: string, distinctId: string | undefined, properties: Record<string, unknown> = {}) {
+    const apiKey = Deno.env.get("POSTHOG_PROJECT_API_KEY");
+    const host = (Deno.env.get("POSTHOG_HOST") || "").replace(/\/$/, "");
+    if (!apiKey || !host) return;
+
+    try {
+        await fetch(`${host}/capture/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                api_key: apiKey,
+                event,
+                distinct_id: distinctId || "server",
+                properties: {
+                    funnel: "tiktok_pruefungscheck",
+                    funnel_version: "2026-04-29",
+                    source: "stripe_webhook",
+                    ...properties,
+                },
+            }),
+        });
+    } catch (error) {
+        console.error(`[posthog] Failed to capture ${event}:`, error);
+    }
+}
+
 // =====================================================
 // IDEMPOTENCY: Check if event was already processed
 // =====================================================
@@ -36,6 +62,40 @@ async function markEventProcessed(eventId: string, eventType: string): Promise<v
     if (error && !error.message.includes('duplicate')) {
         console.error('[webhook] Error marking event as processed:', error);
     }
+}
+
+async function activateTikTokLernplan(tiktokLernplanId: string | undefined, userId: string): Promise<void> {
+    if (!tiktokLernplanId) return;
+
+    const { data, error } = await supabaseAdmin
+        .from('user_lernplans')
+        .update({
+            status: 'active',
+            activated_at: new Date().toISOString(),
+        })
+        .eq('id', tiktokLernplanId)
+        .eq('user_id', userId)
+        .select('id,status,test_score,test_total,weak_topics')
+        .maybeSingle();
+
+    if (error) {
+        console.error(`[webhook] Failed to activate TikTok Lernplan ${tiktokLernplanId}:`, error);
+        await capturePostHog("tiktok_plan_activation_failed", userId, {
+            tiktok_lernplan_id: tiktokLernplanId,
+            plan_status: "activation_failed",
+            error_message: error.message,
+        });
+        return;
+    }
+
+    await capturePostHog("tiktok_plan_activated", userId, {
+        tiktok_lernplan_id: tiktokLernplanId,
+        plan_status: data?.status || "active",
+        test_score: data?.test_score ?? null,
+        test_total: data?.test_total ?? null,
+        weak_topic_count: Array.isArray(data?.weak_topics) ? data.weak_topics.length : 0,
+    });
+    console.log(`[webhook] TikTok Lernplan activated: ${tiktokLernplanId}`);
 }
 
 // =====================================================
@@ -141,6 +201,12 @@ serve(async (req) => {
             case "checkout.session.async_payment_failed": {
                 const session = event.data.object as Stripe.Checkout.Session;
                 console.log(`[webhook] Async payment FAILED: ${session.id}`);
+                await capturePostHog("tiktok_payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
+                    tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+                    checkout_session_id: session.id,
+                    payment_status: session.payment_status,
+                    plan_status: "pending_payment",
+                });
                 // Don't activate - just log. User will need to retry.
                 break;
             }
@@ -260,6 +326,16 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
             currentPeriodEnd: expiresAt,
         });
         console.log(`[webhook] One-time payment recorded for user ${userId}`);
+        if (session.metadata?.tiktok_lernplan_id) {
+            await capturePostHog("tiktok_payment_succeeded_server", userId, {
+                tiktok_lernplan_id: session.metadata.tiktok_lernplan_id,
+                checkout_session_id: session.id,
+                payment_status: session.payment_status,
+                plan_status: "payment_succeeded",
+            });
+        }
+
+        await activateTikTokLernplan(session.metadata?.tiktok_lernplan_id, userId);
 
         // Send recovery email for guest checkout users so they can set a password
         if (session.metadata?.guest_checkout === 'true' && session.customer_email) {

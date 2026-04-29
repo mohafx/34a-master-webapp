@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import type { Lernplan } from './lernplanGenerator';
 
 export const db = {
     // ========== MODULES ==========
@@ -193,6 +194,24 @@ export const db = {
 
         if (error) throw error;
         return (data || []).map((q: any) => this._mapQuestionAnswers(q));
+    },
+
+    // ========== USER LERNPLANS ==========
+    async getActiveUserLernplan(userId: string): Promise<Lernplan | null> {
+        const { data, error } = await supabase
+            .from('user_lernplans')
+            .select('plan_json')
+            .eq('user_id', userId)
+            .eq('source', 'tiktok_funnel')
+            .eq('status', 'active')
+            .order('activated_at', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (error) throw error;
+        if (!data?.plan_json) return null;
+        return data.plan_json as Lernplan;
     },
 
     // ========== FLASHCARDS ==========

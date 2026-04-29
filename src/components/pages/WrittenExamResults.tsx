@@ -3,8 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApp } from '../../App';
 import { db } from '../../services/database';
-import { WrittenExamQuestion, WrittenExamSession, TOPIC_DISTRIBUTION, MINI_EXAM_TOPIC_DISTRIBUTION, WrittenExamTopic } from '../../types';
+import { FULL_EXAM_PASSING_POINTS, FULL_EXAM_TOPIC_POINT_DISTRIBUTION, FULL_EXAM_TOTAL_POINTS, WrittenExamQuestion, WrittenExamSession, TOPIC_DISTRIBUTION, MINI_EXAM_TOPIC_DISTRIBUTION, WrittenExamTopic } from '../../types';
 import { CheckCircle, XCircle, Trophy, RotateCcw, ChevronLeft, ChevronRight, AlertCircle, Share2, Clock, ChevronDown, ChevronUp, BarChart3, ListChecks, Languages } from 'lucide-react';
+import { areAnswerSetsEqual, getAnswerKeys, getQuestionMaxPoints, scoreQuestionPoints } from '../../utils/writtenExamAnswers';
 
 const TOPIC_TRANSLATIONS: Record<string, string> = {
   'Öffentliche Sicherheit und Ordnung': 'قانون الأمن والنظام العام',
@@ -86,23 +87,7 @@ export default function WrittenExamResults() {
   }, [sessionId, authUser, navigate]);
 
   const isAnswerCorrect = (question: WrittenExamQuestion, userAnswer: string): boolean => {
-    if (!userAnswer) return false;
-
-    const correctAnswer = question.correctAnswer.trim().toUpperCase();
-    const userAnswerNormalized = userAnswer.trim().toUpperCase();
-
-    if (correctAnswer.includes(',')) {
-      // Multiple choice
-      const correctAnswers = correctAnswer.split(',').map(a => a.trim()).sort();
-      const userAnswers = userAnswerNormalized.split(',').map(a => a.trim()).sort();
-      return (
-        correctAnswers.length === userAnswers.length &&
-        correctAnswers.every((val, idx) => val === userAnswers[idx])
-      );
-    } else {
-      // Single choice
-      return correctAnswer === userAnswerNormalized;
-    }
+    return areAnswerSetsEqual(question.correctAnswer, userAnswer);
   };
 
   if (loading) {
@@ -129,14 +114,17 @@ export default function WrittenExamResults() {
 
   const score = session.score || 0;
   const totalQuestions = session.totalQuestions;
-  const percentage = Math.round((score / totalQuestions) * 100);
   const examType = (session as any).examType || 'full';
-  const passingThreshold = Math.ceil(totalQuestions * 0.5); // 50% for both types
+  const isFullExam = examType === 'full';
+  const maxScore = isFullExam ? FULL_EXAM_TOTAL_POINTS : totalQuestions;
+  const percentage = Math.round((score / maxScore) * 100);
+  const passingThreshold = isFullExam ? FULL_EXAM_PASSING_POINTS : Math.ceil(totalQuestions * 0.5);
   const passed = score >= passingThreshold;
 
   const handleShareResult = async () => {
     const status = passed ? 'Bestanden ✅' : 'Nicht bestanden ❌';
-    const shareText = `🎓 34a Master Prüfungssimulation\n\nErgebnis: ${score}/${totalQuestions} (${percentage}%)\nStatus: ${status}\n\nBereite dich auch auf die §34a Prüfung vor!`;
+    const resultLabel = isFullExam ? 'Punkte' : 'Ergebnis';
+    const shareText = `🎓 34a Master Prüfungssimulation\n\n${resultLabel}: ${score}/${maxScore} (${percentage}%)\nStatus: ${status}\n\nBereite dich auch auf die §34a Prüfung vor!`;
 
     if (navigator.share) {
       try {
@@ -166,7 +154,10 @@ export default function WrittenExamResults() {
 
     // Initialize with all topics from distribution
     Object.keys(TOPIC_DISTRIBUTION).forEach(topic => {
-      stats[topic] = { total: 0, correct: 0, percentage: 0 };
+      const maxTopicPoints = isFullExam
+        ? FULL_EXAM_TOPIC_POINT_DISTRIBUTION[topic as WrittenExamTopic]?.points || 0
+        : 0;
+      stats[topic] = { total: maxTopicPoints, correct: 0, percentage: 0 };
     });
 
     // Aggregate data
@@ -179,11 +170,13 @@ export default function WrittenExamResults() {
         stats[topic] = { total: 0, correct: 0, percentage: 0 };
       }
 
-      stats[topic].total++;
+      stats[topic].total += isFullExam ? 0 : 1;
 
       const userAnswer = session.userAnswers[q.id];
-      if (userAnswer && isAnswerCorrect(q, userAnswer)) {
-        stats[topic].correct++;
+      if (userAnswer) {
+        stats[topic].correct += isFullExam
+          ? scoreQuestionPoints(q.correctAnswer, userAnswer)
+          : (isAnswerCorrect(q, userAnswer) ? 1 : 0);
       }
     });
 
@@ -269,20 +262,32 @@ export default function WrittenExamResults() {
 
   const correctCount = questions.filter(q => {
     const userAnswer = session.userAnswers[q.id];
-    return userAnswer && isAnswerCorrect(q, userAnswer);
+    return userAnswer && scoreQuestionPoints(q.correctAnswer, userAnswer) === getQuestionMaxPoints(q.correctAnswer);
   }).length;
+
+  const partialCount = isFullExam
+    ? questions.filter(q => {
+      const userAnswer = session.userAnswers[q.id];
+      const points = userAnswer ? scoreQuestionPoints(q.correctAnswer, userAnswer) : 0;
+      return points > 0 && points < getQuestionMaxPoints(q.correctAnswer);
+    }).length
+    : 0;
 
   const incorrectCount = questions.filter(q => {
     const userAnswer = session.userAnswers[q.id];
-    return userAnswer && !isAnswerCorrect(q, userAnswer);
+    if (!userAnswer) return false;
+    const points = scoreQuestionPoints(q.correctAnswer, userAnswer);
+    return isFullExam ? points === 0 : !isAnswerCorrect(q, userAnswer);
   }).length;
 
   const unansweredCount = questions.filter(q => !session.userAnswers[q.id]).length;
 
   const currentQuestion = currentReviewIndex !== null ? questions[currentReviewIndex] : null;
   const currentUserAnswer = currentQuestion ? session.userAnswers[currentQuestion.id] : '';
+  const currentPoints = currentQuestion ? scoreQuestionPoints(currentQuestion.correctAnswer, currentUserAnswer) : 0;
+  const currentMaxPoints = currentQuestion ? getQuestionMaxPoints(currentQuestion.correctAnswer) : 0;
   const currentIsCorrect = currentQuestion && currentUserAnswer
-    ? isAnswerCorrect(currentQuestion, currentUserAnswer)
+    ? currentPoints === currentMaxPoints
     : false;
 
   return (
@@ -298,7 +303,7 @@ export default function WrittenExamResults() {
               <div className="flex flex-col">
                 <div className="flex items-center gap-3 mb-1">
                   <h1 className="text-3xl font-black text-white">
-                    {score} / {totalQuestions}
+                    {score} / {maxScore}
                   </h1>
                   <button
                     onClick={handleShareResult}
@@ -309,7 +314,7 @@ export default function WrittenExamResults() {
                   </button>
                 </div>
                 <p className="text-white/90 text-sm">
-                  {percentage}% richtig beantwortet
+                  {isFullExam ? 'Punkte erreicht' : `${percentage}% richtig beantwortet`}
                 </p>
                 {showTranslation && (
                   <p className="text-white/80 text-xs mt-0.5" dir="rtl">
@@ -352,13 +357,13 @@ export default function WrittenExamResults() {
               <p className="text-white/90 text-sm">
                 {passed
                   ? 'Sie haben die Prüfung erfolgreich bestanden. Herzlichen Glückwunsch!'
-                  : `Sie benötigen mindestens ${passingThreshold} richtige Antworten (50%) zum Bestehen.`}
+                  : `Sie benötigen mindestens ${passingThreshold} ${isFullExam ? 'Punkte' : 'richtige Antworten'} (50%) zum Bestehen.`}
               </p>
               {showTranslation && (
                 <p className="text-white/80 text-xs mt-1 text-right" dir="rtl">
                   {passed
                     ? 'لقد اجتزت الامتحان بنجاح. مبروك!'
-                    : `تحتاج إلى ${passingThreshold} إجابة صحيحة على الأقل (50%) للنجاح.`}
+                    : `تحتاج إلى ${passingThreshold} ${isFullExam ? 'نقطة' : 'إجابة صحيحة'} على الأقل (50%) للنجاح.`}
                 </p>
               )}
             </div>
@@ -374,34 +379,35 @@ export default function WrittenExamResults() {
                 {correctCount > 0 && (
                   <div
                     className="bg-green-500 transition-all"
-                    style={{ width: `${(correctCount / totalQuestions) * 100}%` }}
+                    style={{ width: `${(score / maxScore) * 100}%` }}
                   />
                 )}
-                {/* Incorrect (Red) */}
-                {incorrectCount > 0 && (
-                  <div
-                    className="bg-red-500 transition-all"
-                    style={{ width: `${(incorrectCount / totalQuestions) * 100}%` }}
-                  />
-                )}
-                {/* Unanswered takes remaining space via background */}
               </div>
               <div className="flex justify-between mt-2 text-xs text-slate-400">
                 <span>0</span>
-                <span>{Math.round(totalQuestions / 2)}</span>
-                <span>{totalQuestions}</span>
+                <span>{Math.round(maxScore / 2)}</span>
+                <span>{maxScore}</span>
               </div>
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-3 gap-4">
+            <div className={`grid ${isFullExam ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'} gap-4`}>
               {/* Correct */}
               <div className="bg-green-50 dark:bg-green-900/20 rounded-2xl p-4 text-center border border-green-100 dark:border-green-800/30">
                 <div className="text-2xl sm:text-3xl font-black text-green-600 dark:text-green-400">{correctCount}</div>
-                <div className="text-xs font-semibold text-green-700 dark:text-green-300 mt-1">Richtig</div>
+                <div className="text-xs font-semibold text-green-700 dark:text-green-300 mt-1">{isFullExam ? 'Volle Punkte' : 'Richtig'}</div>
                 {showTranslation && <div className="text-[10px] text-green-600 dark:text-green-400">صحيح</div>}
                 <div className="text-[10px] text-green-500/80 mt-0.5">{Math.round((correctCount / totalQuestions) * 100)}%</div>
               </div>
+
+              {isFullExam && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-2xl p-4 text-center border border-amber-100 dark:border-amber-800/30">
+                  <div className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400">{partialCount}</div>
+                  <div className="text-xs font-semibold text-amber-700 dark:text-amber-300 mt-1">Teilpunkte</div>
+                  {showTranslation && <div className="text-[10px] text-amber-600 dark:text-amber-400">جزئي</div>}
+                  <div className="text-[10px] text-amber-500/80 mt-0.5">{Math.round((partialCount / totalQuestions) * 100)}%</div>
+                </div>
+              )}
 
               {/* Incorrect */}
               <div className="bg-red-50 dark:bg-red-900/20 rounded-2xl p-4 text-center border border-red-100 dark:border-red-800/30">
@@ -637,6 +643,11 @@ export default function WrittenExamResults() {
                             {stats.percentage}%
                           </span>
                         </div>
+                        {isFullExam && (
+                          <div className="mb-1 text-[10px] font-semibold text-slate-400">
+                            {stats.correct} / {stats.total} Punkte
+                          </div>
+                        )}
                         <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2.5">
                           <div
                             className={`h-2.5 rounded-full transition-all ${colorClass}`}
@@ -749,8 +760,11 @@ export default function WrittenExamResults() {
               <div className="space-y-2">
                 {questions.map((question, index) => {
                   const userAnswer = session.userAnswers[question.id];
-                  const isCorrect = userAnswer ? isAnswerCorrect(question, userAnswer) : false;
                   const isAnswered = !!userAnswer;
+                  const questionPoints = userAnswer ? scoreQuestionPoints(question.correctAnswer, userAnswer) : 0;
+                  const maxQuestionPoints = getQuestionMaxPoints(question.correctAnswer);
+                  const isCorrect = isAnswered && questionPoints === maxQuestionPoints;
+                  const isPartial = isFullExam && questionPoints > 0 && questionPoints < maxQuestionPoints;
 
                   return (
                     <button
@@ -774,6 +788,10 @@ export default function WrittenExamResults() {
                           {isAnswered ? (
                             isCorrect ? (
                               <CheckCircle className="text-green-600 dark:text-green-400" size={20} />
+                            ) : isPartial ? (
+                              <span className="rounded-lg bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                                {questionPoints}/{maxQuestionPoints} P
+                              </span>
                             ) : (
                               <XCircle className="text-red-600 dark:text-red-400" size={20} />
                             )
@@ -843,6 +861,16 @@ export default function WrittenExamResults() {
             </div>
 
             <div className="mb-6">
+              {isFullExam && (
+                <div className={`mb-4 inline-flex rounded-full px-3 py-1 text-xs font-bold ${currentIsCorrect
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                  : currentPoints > 0
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                  }`}>
+                  {currentPoints} / {currentMaxPoints} Punkte
+                </div>
+              )}
               <h4 className="text-base font-medium text-slate-900 dark:text-white mb-4">
                 {currentQuestion.questionTextDE}
               </h4>
@@ -859,31 +887,40 @@ export default function WrittenExamResults() {
 
                   const answerText = answer.de;
                   const answerTextAR = answer.ar;
-                  const isCorrect = currentQuestion.correctAnswer.includes(key);
-                  const isUserAnswer = currentUserAnswer?.includes(key);
+                  const correctAnswers = getAnswerKeys(currentQuestion.correctAnswer);
+                  const userAnswers = getAnswerKeys(currentUserAnswer);
+                  const normalizedKey = key.toUpperCase();
+                  const isCorrect = correctAnswers.includes(normalizedKey);
+                  const isUserAnswer = userAnswers.includes(normalizedKey);
 
                   return (
                     <div
                       key={key}
-                      className={`p-3 rounded-xl border-2 ${isCorrect
+                      className={`relative p-3 rounded-xl border-2 ${isCorrect
                         ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
                         : isUserAnswer
-                          ? 'border-red-500 bg-red-50 dark:bg-red-900/20'
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                           : 'border-slate-200 dark:border-slate-700'
+                        } ${isUserAnswer ? 'ring-2 ring-blue-400/40 dark:ring-blue-500/30' : ''
                         }`}
                     >
+                      {isUserAnswer && (
+                        <div className="absolute right-3 top-3 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                          Ausgewählt
+                        </div>
+                      )}
                       <div className="flex items-center gap-3">
                         <div
-                          className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold text-sm ${isCorrect
+                          className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold text-sm ${isUserAnswer
+                            ? 'bg-blue-600 text-white'
+                            : isCorrect
                             ? 'bg-green-500 text-white'
-                            : isUserAnswer
-                              ? 'bg-red-500 text-white'
-                              : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
                             }`}
                         >
                           {key}
                         </div>
-                        <div className="flex-1">
+                        <div className={`flex-1 ${isUserAnswer ? 'pr-24 sm:pr-28' : ''}`}>
                           <div>{answerText}</div>
                           {showTranslation && answerTextAR && (
                             <div className="text-sm text-slate-600 dark:text-slate-300">
@@ -895,7 +932,7 @@ export default function WrittenExamResults() {
                           <CheckCircle className="text-green-600 dark:text-green-400" size={20} />
                         )}
                         {isUserAnswer && !isCorrect && (
-                          <XCircle className="text-red-600 dark:text-red-400" size={20} />
+                          <XCircle className="text-blue-600 dark:text-blue-400" size={20} />
                         )}
                       </div>
                     </div>

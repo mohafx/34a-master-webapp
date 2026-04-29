@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useApp } from '../App';
 import { usePostHog } from '../contexts/PostHogProvider';
 import { supabase } from '../lib/supabase';
+import { getEmailDomain, getTikTokAnalyticsContext } from '../utils/tiktokAnalytics';
 import { X, Crown, Check, MessageCircle, Lightbulb, Infinity, ShieldCheck, Rocket, Languages, ChevronDown, Users, BookOpen, Timer, Blocks, Calendar, Mic, Sparkles, Pencil, GraduationCap, Layers, Target, Trophy, Mail, LogIn, Eye, EyeOff } from 'lucide-react';
 import { EmbeddedPayment } from './EmbeddedPayment';
 import { TransitionAccessNotice } from './TransitionAccessNotice';
@@ -110,14 +111,27 @@ interface PaywallViewProps {
     onClose?: () => void;
     featureName?: string;
     isEmbedded?: boolean;
+    tiktokPlanPayload?: unknown;
 }
 
-export function PaywallView({ onClose, featureName, isEmbedded = false }: PaywallViewProps) {
+export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPlanPayload }: PaywallViewProps) {
     const { openCheckout, loading: subscriptionLoading, processPaymentSuccess } = useSubscription();
     const { user } = useAuth();
     const { language, openAuthDialog, toggleLanguage } = useApp();
     const { trackEvent } = usePostHog();
     const showArabic = language === 'DE_AR';
+    const forceLightMode = featureName === 'tiktok_onboarding_result';
+    const isTikTokPaywall = featureName === 'tiktok_onboarding_result';
+    const tiktokAnalytics = (tiktokPlanPayload as any)?.analytics || {};
+    const getTikTokPaywallContext = (extra: Record<string, any> = {}) => getTikTokAnalyticsContext('paywall', language, {
+        source: 'tiktok_result',
+        has_tiktok_plan: Boolean(tiktokPlanPayload),
+        test_score: tiktokAnalytics.score,
+        percentage: tiktokAnalytics.percentage,
+        risk_level: tiktokAnalytics.riskLevel,
+        weak_topic_count: tiktokAnalytics.weakTopicCount,
+        ...extra,
+    });
 
     const selectedPlan = '6months';
     const [loading, setLoading] = useState(false);
@@ -166,21 +180,55 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
             feature_name: featureName,
             source: isEmbedded ? 'onboarding' : 'dialog'
         });
+        if (isTikTokPaywall) {
+            trackEvent('tiktok_paywall_opened', getTikTokPaywallContext());
+        }
     }, []);
+
+    useEffect(() => {
+        if (!forceLightMode) return;
+
+        const root = document.documentElement;
+        const wasDark = root.classList.contains('dark');
+        const previousTheme = localStorage.getItem('theme');
+
+        root.classList.remove('dark');
+
+        return () => {
+            if (wasDark) {
+                root.classList.add('dark');
+            }
+            if (previousTheme) {
+                localStorage.setItem('theme', previousTheme);
+            }
+        };
+    }, [forceLightMode]);
 
     // ── Authenticated user checkout ──────────────────────────────────────
     const proceedToCheckout = async () => {
         setLoading(true);
         setError('');
         try {
-            const secret = await openCheckout(selectedPlan);
+            const secret = await openCheckout(selectedPlan, { tiktokPlanPayload });
             if (secret && typeof secret === 'string' && secret.length > 0) {
                 setClientSecret(secret);
+                if (isTikTokPaywall) {
+                    trackEvent('tiktok_checkout_session_created', getTikTokPaywallContext({
+                        checkout_mode: 'authenticated',
+                    }));
+                }
             } else {
                 throw new Error('Invalid session created');
             }
         } catch (err: any) {
             console.error('Checkout error:', err);
+            if (isTikTokPaywall) {
+                trackEvent('tiktok_checkout_poll_failed', getTikTokPaywallContext({
+                    checkout_mode: 'authenticated',
+                    reason: 'session_create_failed',
+                    error_message: err?.message,
+                }));
+            }
             setError('Ein Fehler ist aufgetreten. Bitte versuche es später erneut oder kontaktiere den Support.');
         } finally {
             setLoading(false);
@@ -191,13 +239,25 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
     const handleGuestCheckout = async () => {
         if (!guestEmail || !guestEmail.includes('@')) {
             setGuestError('Bitte gib eine gültige E-Mail-Adresse ein.');
+            if (isTikTokPaywall) {
+                trackEvent('tiktok_guest_email_failed', getTikTokPaywallContext({
+                    reason: 'invalid_email',
+                    has_email: Boolean(guestEmail),
+                }));
+            }
             return;
         }
         setLoading(true);
         setGuestError('');
+        if (isTikTokPaywall) {
+            trackEvent('tiktok_guest_email_submitted', getTikTokPaywallContext({
+                has_email: true,
+                email_domain: getEmailDomain(guestEmail),
+            }));
+        }
         try {
             const { data, error: fnError } = await supabase.functions.invoke('create-guest-checkout', {
-                body: { email: guestEmail.trim().toLowerCase(), priceId: selectedPlan }
+                body: { email: guestEmail.trim().toLowerCase(), priceId: selectedPlan, tiktokPlanPayload }
             });
 
             if (fnError) throw new Error(fnError.message);
@@ -207,6 +267,11 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
                 setLoginEmail(guestEmail);
                 setGuestMode('login');
                 setGuestError('Diese E-Mail hat bereits ein Konto. Bitte melde dich an.');
+                if (isTikTokPaywall) {
+                    trackEvent('tiktok_existing_account_login_prompted', getTikTokPaywallContext({
+                        email_domain: getEmailDomain(guestEmail),
+                    }));
+                }
                 return;
             }
             if (data?.error) throw new Error(data.message || data.error);
@@ -214,9 +279,22 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
 
             setClientSecret(data.clientSecret);
             setGuestMode(null);
+            if (isTikTokPaywall) {
+                trackEvent('tiktok_checkout_session_created', getTikTokPaywallContext({
+                    checkout_mode: 'guest',
+                    email_domain: getEmailDomain(guestEmail),
+                }));
+            }
         } catch (err: any) {
             console.error('Guest checkout error:', err);
             setGuestError(err.message || 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.');
+            if (isTikTokPaywall) {
+                trackEvent('tiktok_guest_email_failed', getTikTokPaywallContext({
+                    reason: 'checkout_create_failed',
+                    error_message: err?.message,
+                    email_domain: getEmailDomain(guestEmail),
+                }));
+            }
         } finally {
             setLoading(false);
         }
@@ -252,6 +330,12 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
         if (!hasAcceptedTerms) {
             setShakeTerms(true);
             setTimeout(() => setShakeTerms(false), 500);
+            if (isTikTokPaywall) {
+                trackEvent('tiktok_paywall_checkout_clicked', getTikTokPaywallContext({
+                    blocked: true,
+                    blocked_reason: 'terms_not_accepted',
+                }));
+            }
             return;
         }
 
@@ -260,6 +344,12 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
             price: 49,
             source: isEmbedded ? 'onboarding' : 'paywall_dialog'
         });
+        if (isTikTokPaywall) {
+            trackEvent('tiktok_paywall_checkout_clicked', getTikTokPaywallContext({
+                blocked: false,
+                checkout_mode: user ? 'authenticated' : 'guest',
+            }));
+        }
 
         if (user) {
             // Authenticated user — normal flow
@@ -268,11 +358,20 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
             // Guest — show email input
             setGuestMode('email');
             setGuestError('');
+            if (isTikTokPaywall) {
+                trackEvent('tiktok_guest_email_started', getTikTokPaywallContext());
+            }
         }
     };
 
     const handlePaymentComplete = async () => {
         setSuccessMode(true);
+        if (isTikTokPaywall) {
+            trackEvent('tiktok_checkout_completed_client', getTikTokPaywallContext({
+                checkout_mode: user ? 'authenticated' : 'guest',
+                completion_source: 'paywall',
+            }));
+        }
         if (user) {
             await processPaymentSuccess();
             setTimeout(() => { onClose?.(); }, 2000);
@@ -396,7 +495,13 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
                         >
                             ← Zurück
                         </button>
-                        <EmbeddedPayment clientSecret={clientSecret} onComplete={handlePaymentComplete} />
+                        <EmbeddedPayment
+                            clientSecret={clientSecret}
+                            onComplete={handlePaymentComplete}
+                            trackingContext={isTikTokPaywall ? getTikTokPaywallContext({
+                                checkout_mode: user ? 'authenticated' : 'guest',
+                            }) : undefined}
+                        />
                     </div>
                 ) : (
                     <div className={`md:grid md:grid-cols-2 md:gap-x-12 md:gap-y-6 md:items-start max-w-full ${isEmbedded ? 'px-4 sm:px-6 pt-4 pb-6' : ''}`}>
@@ -524,12 +629,31 @@ export function PaywallView({ onClose, featureName, isEmbedded = false }: Paywal
                             <div className="mt-6">
                                 <div className={`mb-4 flex items-start gap-3 px-1 transition-all ${shakeTerms ? 'animate-shake' : ''}`}>
                                     <button
-                                        onClick={() => setHasAcceptedTerms(!hasAcceptedTerms)}
+                                        onClick={() => {
+                                            const nextAccepted = !hasAcceptedTerms;
+                                            setHasAcceptedTerms(nextAccepted);
+                                            if (isTikTokPaywall) {
+                                                trackEvent('tiktok_paywall_terms_toggled', getTikTokPaywallContext({
+                                                    accepted: nextAccepted,
+                                                }));
+                                            }
+                                        }}
                                         className={`w-4 h-4 rounded border shrink-0 mt-0.5 ${hasAcceptedTerms ? 'bg-blue-600 border-blue-600' : 'border-slate-300 dark:border-slate-600 dark:bg-slate-900'}`}
                                     >
                                         {hasAcceptedTerms && <Check size={12} strokeWidth={4} className="text-white" />}
                                     </button>
-                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 cursor-pointer" onClick={() => setHasAcceptedTerms(!hasAcceptedTerms)}>
+                                    <p
+                                        className="text-[11px] text-slate-500 dark:text-slate-400 cursor-pointer"
+                                        onClick={() => {
+                                            const nextAccepted = !hasAcceptedTerms;
+                                            setHasAcceptedTerms(nextAccepted);
+                                            if (isTikTokPaywall) {
+                                                trackEvent('tiktok_paywall_terms_toggled', getTikTokPaywallContext({
+                                                    accepted: nextAccepted,
+                                                }));
+                                            }
+                                        }}
+                                    >
                                         Widerrufsrecht: Ich willige in sofortigen Zugang ein und bestätige, dass mein <a href="#/agb" target="_blank" className="text-blue-600 dark:text-blue-300 font-medium">Widerrufsrecht</a> mit Nutzungsbeginn erlischt.
                                     </p>
                                 </div>

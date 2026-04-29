@@ -1,19 +1,25 @@
 import React, { useRef } from 'react';
-import { ClipboardList, Languages } from 'lucide-react';
+import { ClipboardList, Gift, Languages, UserX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import { useApp } from '../../App';
+import { getTikTokAnalyticsContext, resetTikTokFunnelSession } from '../../utils/tiktokAnalytics';
 
 export default function TikTokFunnel() {
     const navigate = useNavigate();
     const { trackEvent } = usePostHog();
     const { toggleLanguage, language } = useApp();
     const containerRef = useRef<HTMLDivElement>(null);
+    const initialTrackedRef = useRef(false);
 
-    // Log start event
     React.useEffect(() => {
-        trackEvent('tiktok_funnel_started', { source: 'tiktok' });
-    }, [trackEvent]);
+        if (initialTrackedRef.current) return;
+        initialTrackedRef.current = true;
+        resetTikTokFunnelSession();
+        const context = getTikTokAnalyticsContext('start', language, { source: 'tiktok' });
+        trackEvent('tiktok_funnel_viewed', context);
+        trackEvent('tiktok_funnel_started', context);
+    }, [trackEvent, language]);
 
     const isAr = language === 'DE_AR';
 
@@ -58,11 +64,11 @@ export default function TikTokFunnel() {
                         {/* Headline */}
                         <div className="space-y-2">
                             <h1 className="text-[30.4px] sm:text-[36.1px] leading-[1.05] font-black text-[#0F172A] tracking-tight text-left">
-                                Bestehe die §34a-Prüfung – mit <span className="text-[#3B65F5]">arabischen</span> Erklärungen
+                                Würdest du die echte IHK <span className="text-[#3B65F5]">§34a-Prüfung</span> heute bestehen?
                             </h1>
                             {isAr && (
                                 <p dir="rtl" className="text-[17.1px] sm:text-[20.4px] font-bold text-slate-600 leading-tight animate-reveal text-left">
-                                    اجتز امتحان <span dir="ltr">§34a</span> - مع شروحات عربية
+                                    هل ستنجح اليوم في امتحان <span dir="ltr">IHK §34a</span> الحقيقي؟
                                 </p>
                             )}
                         </div>
@@ -80,13 +86,23 @@ export default function TikTokFunnel() {
                                 />
                                 
                                 <button
-                                    onClick={() => isAr && toggleLanguage()}
+                                    onClick={() => {
+                                        if (!isAr) return;
+                                        trackEvent('language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE' }));
+                                        trackEvent('tiktok_language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE' }));
+                                        toggleLanguage();
+                                    }}
                                     className={`relative z-10 px-6.5 py-1.5 text-[13.3px] font-extrabold transition-colors duration-300 flex items-center justify-center min-w-[85px] ${!isAr ? 'text-[#0F172A]' : 'text-slate-400'}`}
                                 >
                                     DE
                                 </button>
                                 <button
-                                    onClick={() => !isAr && toggleLanguage()}
+                                    onClick={() => {
+                                        if (isAr) return;
+                                        trackEvent('language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE_AR' }));
+                                        trackEvent('tiktok_language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE_AR' }));
+                                        toggleLanguage();
+                                    }}
                                     className={`relative z-10 px-6.5 py-1.5 text-[15.2px] font-extrabold transition-colors duration-300 flex items-center justify-center gap-2 min-w-[104px] ${isAr ? 'text-[#3B65F5]' : 'text-slate-400'}`}
                                 >
                                     <Languages className={`w-[17px] h-[17px] ${isAr ? 'text-[#3B65F5]' : 'text-slate-400'}`} />
@@ -103,26 +119,39 @@ export default function TikTokFunnel() {
                         <div className="relative bg-white p-7 rounded-[28px] shadow-[0_8px_40px_rgba(59,101,245,0.08)] border border-blue-50/50 space-y-7 overflow-hidden">
                             <div className="text-left space-y-3">
                                 <h4 className="text-[#0F172A] font-extrabold text-[16.1px] leading-tight tracking-tight">
-                                    Würdest du heute bestehen?
+                                    Teste dich mit 9 typischen Prüfungsfragen
                                 </h4>
                                 {isAr && (
                                     <p dir="rtl" className="text-[15.3px] font-bold text-slate-600 leading-tight animate-reveal">
-                                        هل ستنجح اليوم؟
+                                        اختبر نفسك مع 9 أسئلة امتحان نموذجية
                                     </p>
                                 )}
-                                <p className="text-slate-500 text-[13.3px] leading-relaxed">
-                                    Mach den kurzen Test und finde sofort heraus, ob du bereit für die echte IHK-Prüfung bist.
-                                </p>
+                                <div className="space-y-2 text-slate-500 text-[13.3px] leading-relaxed font-bold">
+                                    <p className="flex items-center gap-2">
+                                        <Gift className="h-4 w-4 text-[#3B65F5]" strokeWidth={2.5} />
+                                        <span>Kostenloser Prüfungscheck</span>
+                                    </p>
+                                    <p className="flex items-center gap-2">
+                                        <Languages className="h-4 w-4 text-[#3B65F5]" strokeWidth={2.5} />
+                                        <span>Deutsch + Arabisch</span>
+                                    </p>
+                                    <p className="flex items-center gap-2">
+                                        <UserX className="h-4 w-4 text-[#3B65F5]" strokeWidth={2.5} />
+                                        <span>Keine Anmeldung nötig</span>
+                                    </p>
+                                </div>
                                 {isAr && (
                                     <p dir="rtl" className="text-[12.6px] font-medium text-slate-400 leading-tight mt-1 animate-reveal">
-                                        أجرِ الاختبار القصير واكتشف فوراً ما إذا كنت مستعداً لامتحان <span dir="ltr">IHK</span> الحقيقي.
+                                        يستغرق حوالي 3 دقائق · ألماني + عربي · بدون تسجيل.
                                     </p>
                                 )}
                             </div>
 
                             <button
                                 onClick={() => {
-                                    trackEvent('tiktok_funnel_cta_clicked');
+                                    trackEvent('tiktok_funnel_cta_clicked', getTikTokAnalyticsContext('start', language, {
+                                        cta: 'pruefungscheck_starten',
+                                    }));
                                     navigate('/tiktok/loading');
                                 }}
                                 className="w-full font-black min-h-[57px] px-6 rounded-[28px] text-[17.1px] transition-all flex flex-col items-center justify-center bg-[#3B65F5] hover:bg-[#3256D6] text-white active:scale-[0.98] shadow-lg shadow-blue-500/20 relative overflow-hidden group/btn py-2"
@@ -131,16 +160,17 @@ export default function TikTokFunnel() {
                                 
                                 <div className="flex flex-col items-center justify-center relative z-10">
                                     <div className="flex items-center gap-3">
-                                        <span>Test starten</span>
+                                        <span>Prüfungscheck starten</span>
                                         <ClipboardList className="w-[19px] h-[19px]" strokeWidth={2.5} />
                                     </div>
                                     {isAr && (
                                         <span dir="rtl" className="text-[13.6px] opacity-90 font-bold animate-reveal mt-0.5">
-                                            ابدأ الاختبار
+                                            ابدأ فحص الامتحان المجاني
                                         </span>
                                     )}
                                 </div>
                             </button>
+
                         </div>
                     </div>
                 </div>
@@ -154,11 +184,11 @@ export default function TikTokFunnel() {
                     </div>
                     <div className="text-center space-y-0.5">
                         <p className="text-[12.3px] text-slate-500 font-bold">
-                            Schon <span className="text-[#0F172A]">1000+ Nutzer</span> bereiten sich vor
+                            Für arabischsprachige Prüflinge in Deutschland gemacht.
                         </p>
                         {isAr && (
                             <p dir="rtl" className="text-[11.7px] text-slate-400 font-black animate-reveal">
-                                أكثر من 1000 مستخدم يستعدون بالفعل
+                                مصنوع للمتقدمين العرب في ألمانيا.
                             </p>
                         )}
                     </div>

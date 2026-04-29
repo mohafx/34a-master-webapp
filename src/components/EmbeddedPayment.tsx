@@ -3,13 +3,16 @@ import { EmbeddedCheckoutProvider, EmbeddedCheckout } from '@stripe/react-stripe
 import { loadStripe, Stripe } from '@stripe/stripe-js';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { usePostHog, type AnalyticsEventProperties } from '../contexts/PostHogProvider';
 
 interface EmbeddedPaymentProps {
     clientSecret: string;
     onComplete?: () => void;
+    trackingContext?: AnalyticsEventProperties;
 }
 
-export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentProps) => {
+export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: EmbeddedPaymentProps) => {
+    const { trackEvent } = usePostHog();
     const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
@@ -21,12 +24,25 @@ export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentPro
     useEffect(() => {
         const sessionId = clientSecret.split('_secret_')[0];
         console.log('[EmbeddedPayment] Mounted, session:', sessionId);
+        if (trackingContext) {
+            trackEvent('tiktok_checkout_embedded_loaded', {
+                ...trackingContext,
+                checkout_session_id: sessionId,
+            });
+        }
 
         const key = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 
         if (!key) {
             setError("Stripe ist nicht konfiguriert. Bitte kontaktiere den Support.");
             setLoading(false);
+            if (trackingContext) {
+                trackEvent('tiktok_checkout_poll_failed', {
+                    ...trackingContext,
+                    checkout_session_id: sessionId,
+                    reason: 'missing_stripe_key',
+                });
+            }
             return;
         }
 
@@ -52,17 +68,40 @@ export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentPro
             promise.then((stripe) => {
                 if (!stripe) {
                     setError("Stripe konnte nicht geladen werden.");
+                    if (trackingContext) {
+                        trackEvent('tiktok_checkout_poll_failed', {
+                            ...trackingContext,
+                            checkout_session_id: sessionId,
+                            reason: 'stripe_load_empty',
+                        });
+                    }
                 }
                 setLoading(false);
             }).catch((err) => {
                 console.error("Stripe load error:", err);
                 setError("Stripe konnte nicht geladen werden.");
                 setLoading(false);
+                if (trackingContext) {
+                    trackEvent('tiktok_checkout_poll_failed', {
+                        ...trackingContext,
+                        checkout_session_id: sessionId,
+                        reason: 'stripe_load_failed',
+                        error_message: err?.message,
+                    });
+                }
             });
         } catch (err) {
             console.error("Stripe init error:", err);
             setError("Stripe konnte nicht initialisiert werden.");
             setLoading(false);
+            if (trackingContext) {
+                trackEvent('tiktok_checkout_poll_failed', {
+                    ...trackingContext,
+                    checkout_session_id: sessionId,
+                    reason: 'stripe_init_failed',
+                    error_message: err instanceof Error ? err.message : 'Unknown error',
+                });
+            }
         }
 
         // Cleanup on unmount
@@ -82,6 +121,15 @@ export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentPro
         let pollCount = 0;
         const maxPolls = 5; // Reduced from 60 - webhook should arrive within ~20s usually
         const backoffDelays = [3000, 5000, 8000, 12000, 18000]; // Exponential backoff
+        const sessionId = clientSecret.split('_secret_')[0];
+
+        if (trackingContext) {
+            trackEvent('tiktok_checkout_poll_started', {
+                ...trackingContext,
+                checkout_session_id: sessionId,
+                max_polls: maxPolls,
+            });
+        }
 
         const checkPaymentStatus = async () => {
             // Wait until initial check is complete
@@ -101,6 +149,13 @@ export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentPro
                 if (hasSubscriptionNow && !hadSubscriptionOnMountRef.current && !onCompleteCalledRef.current) {
                     console.log('[EmbeddedPayment] NEW subscription detected via polling');
                     onCompleteCalledRef.current = true;
+                    if (trackingContext) {
+                        trackEvent('tiktok_checkout_poll_success', {
+                            ...trackingContext,
+                            checkout_session_id: sessionId,
+                            poll_count: pollCount,
+                        });
+                    }
 
                     setTimeout(() => {
                         if (onComplete) {
@@ -118,6 +173,14 @@ export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentPro
                 schedulNextPoll();
             } else {
                 console.log('[EmbeddedPayment] Max polls reached, stopping');
+                if (trackingContext) {
+                    trackEvent('tiktok_checkout_poll_failed', {
+                        ...trackingContext,
+                        checkout_session_id: sessionId,
+                        reason: 'max_polls_reached',
+                        poll_count: pollCount,
+                    });
+                }
             }
         };
 
@@ -144,6 +207,13 @@ export const EmbeddedPayment = ({ clientSecret, onComplete }: EmbeddedPaymentPro
 
         console.log('[EmbeddedPayment] Stripe onComplete callback fired');
         onCompleteCalledRef.current = true;
+        if (trackingContext) {
+            trackEvent('tiktok_checkout_completed_client', {
+                ...trackingContext,
+                checkout_session_id: clientSecret.split('_secret_')[0],
+                completion_source: 'stripe_callback',
+            });
+        }
 
         // Stop polling since we got the callback
         if (pollingIntervalRef.current) {

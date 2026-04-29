@@ -2,22 +2,24 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../App';
 import { Loader2 } from 'lucide-react';
+import { usePostHog } from '../../contexts/PostHogProvider';
+import { getTikTokAnalyticsContext } from '../../utils/tiktokAnalytics';
 
 const LOADING_TEXTS = [
     { 
-        de: 'Analysiere deine Antworten...', 
-        ar: 'جاري تحليل إجاباتك...',
-        duration: 2000 
+        de: 'Wir prüfen deine Antworten...', 
+        ar: 'نراجع إجاباتك...',
+        duration: 900 
     },
     { 
-        de: 'Identifiziere Wissenslücken im Gewerberecht...', 
-        ar: 'تحديد الثغرات المعرفية في قانون المهن...',
-        duration: 1500 
+        de: 'Wir erkennen, welche Themen dir Punkte kosten können...', 
+        ar: 'نحدد المواضيع التي قد تخسرك نقاط...',
+        duration: 900 
     },
     { 
-        de: 'Erstelle deinen persönlichen, adaptiven Lernplan...', 
-        ar: 'إنشاء خطتك الدراسية الشخصية والتكيفية...',
-        duration: 2000 
+        de: 'Dein Lernplan wird vorbereitet...', 
+        ar: 'نجهز لك خطة تعلم واضحة...',
+        duration: 900 
     }
 ];
 
@@ -25,6 +27,7 @@ export default function TikTokResultLoading() {
     const navigate = useNavigate();
     const location = useLocation();
     const { language } = useApp();
+    const { trackEvent } = usePostHog();
     const isAr = language === 'DE_AR';
     
     const [textIndex, setTextIndex] = useState(0);
@@ -36,6 +39,12 @@ export default function TikTokResultLoading() {
     useEffect(() => {
         const totalDuration = LOADING_TEXTS.reduce((acc, curr) => acc + curr.duration, 0);
         const startTime = Date.now();
+        let lastTrackedStep = -1;
+
+        trackEvent('tiktok_analysis_started', getTikTokAnalyticsContext('analysis_loading', language, {
+            steps_count: LOADING_TEXTS.length,
+            expected_duration_ms: totalDuration,
+        }));
 
         const interval = setInterval(() => {
             const elapsed = Date.now() - startTime;
@@ -55,15 +64,27 @@ export default function TikTokResultLoading() {
             }
             
             setTextIndex(foundIndex);
+            if (foundIndex !== lastTrackedStep) {
+                lastTrackedStep = foundIndex;
+                trackEvent('tiktok_analysis_step_viewed', getTikTokAnalyticsContext('analysis_loading', language, {
+                    step_index: foundIndex + 1,
+                    steps_count: LOADING_TEXTS.length,
+                    elapsed_ms: elapsed,
+                }));
+            }
 
             if (elapsed >= totalDuration) {
                 clearInterval(interval);
+                trackEvent('tiktok_analysis_completed', getTikTokAnalyticsContext('analysis_loading', language, {
+                    duration_ms: Date.now() - startTime,
+                    steps_count: LOADING_TEXTS.length,
+                }));
                 navigate('/tiktok/result', { state: testData, replace: true });
             }
         }, 50);
 
         return () => clearInterval(interval);
-    }, [navigate, testData]);
+    }, [navigate, testData, language, trackEvent]);
 
     return (
         <div className="fixed inset-0 z-50 bg-[#F8FAFC] flex flex-col items-center justify-center p-6 font-sans overflow-hidden">

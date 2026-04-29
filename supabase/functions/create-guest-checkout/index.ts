@@ -18,6 +18,77 @@ const supabaseAdmin = createClient(
     { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
+async function capturePostHog(event: string, distinctId: string | undefined, properties: Record<string, unknown> = {}) {
+    const apiKey = Deno.env.get("POSTHOG_PROJECT_API_KEY");
+    const host = (Deno.env.get("POSTHOG_HOST") || "").replace(/\/$/, "");
+    if (!apiKey || !host) return;
+
+    try {
+        await fetch(`${host}/capture/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                api_key: apiKey,
+                event,
+                distinct_id: distinctId || "server",
+                properties: {
+                    funnel: "tiktok_pruefungscheck",
+                    funnel_version: "2026-04-29",
+                    source: "tiktok_result",
+                    ...properties,
+                },
+            }),
+        });
+    } catch (error) {
+        console.error(`[posthog] Failed to capture ${event}:`, error);
+    }
+}
+
+async function createPendingTikTokLernplan(
+    userId: string,
+    userEmail: string,
+    payload: any,
+): Promise<string | null> {
+    if (!payload?.planJson || payload?.source !== "tiktok_funnel") return null;
+
+    const { data, error } = await supabaseAdmin
+        .from("user_lernplans")
+        .insert({
+            user_id: userId,
+            user_email: userEmail,
+            source: "tiktok_funnel",
+            status: "pending_payment",
+            plan_json: payload.planJson,
+            weak_topics: Array.isArray(payload.weakTopics) ? payload.weakTopics : [],
+            test_score: typeof payload.testScore === "number" ? payload.testScore : null,
+            test_total: typeof payload.testTotal === "number" ? payload.testTotal : null,
+        })
+        .select("id")
+        .single();
+
+    if (error) {
+        console.error("[guest-checkout] Failed to create pending TikTok Lernplan:", error);
+        await capturePostHog("tiktok_plan_activation_failed", userId, {
+            plan_status: "pending_create_failed",
+            test_score: typeof payload.testScore === "number" ? payload.testScore : null,
+            test_total: typeof payload.testTotal === "number" ? payload.testTotal : null,
+            weak_topic_count: Array.isArray(payload.weakTopics) ? payload.weakTopics.length : 0,
+            error_message: error.message,
+        });
+        throw new Error("TikTok-Lernplan konnte nicht vorbereitet werden.");
+    }
+
+    await capturePostHog("tiktok_plan_pending_created", userId, {
+        tiktok_lernplan_id: data?.id,
+        plan_status: "pending_payment",
+        test_score: typeof payload.testScore === "number" ? payload.testScore : null,
+        test_total: typeof payload.testTotal === "number" ? payload.testTotal : null,
+        weak_topic_count: Array.isArray(payload.weakTopics) ? payload.weakTopics.length : 0,
+    });
+
+    return data?.id || null;
+}
+
 serve(async (req) => {
     if (req.method === "OPTIONS") {
         return new Response(null, { headers: corsHeaders });
@@ -25,7 +96,7 @@ serve(async (req) => {
 
     try {
         // Parse body — no auth header required for guest checkout
-        const { email, priceId } = await req.json();
+        const { email, priceId, tiktokPlanPayload } = await req.json();
 
         // --- Validate input ---
         if (!email || typeof email !== "string" || !email.includes("@")) {
@@ -97,6 +168,17 @@ serve(async (req) => {
         }).select().maybeSingle();
         // Ignore errors here — profile is not critical for checkout
 
+        const tiktokLernplanId = await createPendingTikTokLernplan(userId, email, tiktokPlanPayload);
+        const metadata: Record<string, string> = {
+            user_id: userId,
+            plan_type: priceId,
+            guest_checkout: "true",
+            guest_email: email,
+        };
+        if (tiktokLernplanId) {
+            metadata.tiktok_lernplan_id = tiktokLernplanId;
+        }
+
         // --- Create Stripe Checkout Session ---
         const origin = req.headers.get("origin") || Deno.env.get("SITE_URL") || "https://34a-master.app";
         const session = await stripe.checkout.sessions.create({
@@ -108,22 +190,24 @@ serve(async (req) => {
             customer_email: email,
             customer_creation: "always",
             client_reference_id: userId,
-            metadata: {
-                user_id: userId,
-                plan_type: priceId,
-                guest_checkout: "true",
-                guest_email: email,
-            },
+            metadata,
             payment_intent_data: {
-                metadata: {
-                    user_id: userId,
-                    plan_type: priceId,
-                    guest_checkout: "true",
-                },
+                metadata,
             },
         });
 
         console.log(`[guest-checkout] Stripe session created: ${session.id} for user ${userId}`);
+        if (tiktokLernplanId) {
+            await capturePostHog("tiktok_checkout_session_created_server", userId, {
+                tiktok_lernplan_id: tiktokLernplanId,
+                checkout_session_id: session.id,
+                payment_status: session.payment_status,
+                test_score: typeof tiktokPlanPayload?.testScore === "number" ? tiktokPlanPayload.testScore : null,
+                test_total: typeof tiktokPlanPayload?.testTotal === "number" ? tiktokPlanPayload.testTotal : null,
+                weak_topic_count: Array.isArray(tiktokPlanPayload?.weakTopics) ? tiktokPlanPayload.weakTopics.length : 0,
+                guest_checkout: true,
+            });
+        }
 
         return new Response(
             JSON.stringify({ clientSecret: session.client_secret }),

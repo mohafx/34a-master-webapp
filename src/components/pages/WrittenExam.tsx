@@ -4,8 +4,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useApp } from '../../App';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import { db } from '../../services/database';
-import { generateExamQuestions, calculateScore } from '../../services/writtenExam';
-import { WrittenExamQuestion, WrittenExamSession } from '../../types';
+import { generateExamQuestions, calculateExamPoints } from '../../services/writtenExam';
+import { FULL_EXAM_PASSING_POINTS, FULL_EXAM_TOTAL_POINTS, WrittenExamQuestion, WrittenExamSession } from '../../types';
 import { Clock, ChevronLeft, ChevronRight, CheckCircle, AlertTriangle, Save, Info, ArrowLeft, Settings, Bookmark } from 'lucide-react';
 import { QuizSettingsDialog } from './QuizSettingsDialog';
 
@@ -152,14 +152,15 @@ export default function WrittenExam() {
 
     try {
       // Calculate score
-      const score = calculateScore(questions, userAnswers);
+      const score = calculateExamPoints(questions, userAnswers);
 
       // Track exam completion
       trackEvent('written_exam_completed', {
         total_questions: questions.length,
         answered_count: Object.keys(userAnswers).length,
-        score_percent: score.percentage,
-        passed: score.passed,
+        score_points: score,
+        score_percent: Math.round((score / FULL_EXAM_TOTAL_POINTS) * 100),
+        passed: score >= FULL_EXAM_PASSING_POINTS,
         duration_seconds: Math.round((Date.now() - examStartTime) / 1000),
       });
 
@@ -615,4 +616,3 @@ export default function WrittenExam() {
     </div>
   );
 }
-
