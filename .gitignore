@@ -103,3 +103,4 @@ local_archive/
 *.mov
 *.avi
 public/Videos/
+app-src/
