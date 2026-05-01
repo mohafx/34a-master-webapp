@@ -52,6 +52,13 @@ function isTikTokEvent(event: string): boolean {
   return event.startsWith("tiktok_");
 }
 
+function isUnauthenticatedSignupEvent(event: string, properties: Record<string, unknown>): boolean {
+  return event === "user_signed_up_server" &&
+    typeof properties.user_id === "string" &&
+    typeof properties.email === "string" &&
+    properties.method === "email";
+}
+
 function sanitizeProperties(properties: unknown): Record<string, unknown> {
   if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
     return {};
@@ -111,7 +118,9 @@ serve(async (req) => {
       }
     }
 
-    if (!user && !isTikTokEvent(event)) {
+    const allowUnauthenticatedSignup = isUnauthenticatedSignupEvent(event, cleanProperties);
+
+    if (!user && !isTikTokEvent(event) && !allowUnauthenticatedSignup) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -126,11 +135,11 @@ serve(async (req) => {
     }
 
     const provider = user?.app_metadata?.provider || cleanProperties.method || "anonymous";
-    const distinctId = user?.id || String(cleanProperties.session_funnel_id || cleanProperties.anonymous_id || "server");
-    const setProperties = user
+    const distinctId = user?.id || String(cleanProperties.user_id || cleanProperties.session_funnel_id || cleanProperties.anonymous_id || "server");
+    const setProperties = user || allowUnauthenticatedSignup
       ? {
-        email: user.email,
-        created_at: user.created_at,
+        email: user?.email || cleanProperties.email,
+        created_at: user?.created_at || cleanProperties.created_at || null,
         auth_provider: provider,
         registration_source: cleanProperties.source || null,
       }

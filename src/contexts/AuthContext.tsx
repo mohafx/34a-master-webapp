@@ -127,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
 
             trackServerEvent('user_signed_up_server', {
+                user_id: data.user.id,
                 email: data.user.email,
                 method: 'email',
                 display_name_present: Boolean(displayName),

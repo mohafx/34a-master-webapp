@@ -76,6 +76,7 @@ export type AnalyticsEventName =
     | 'lernplan_exam_date_saved'
     | 'lernplan_node_opened'
     | 'lernplan_continue_clicked'
+    | 'lernplan_guest_unlock_clicked'
     // Exam Events
     | 'written_exam_started'
     | 'written_exam_completed'
@@ -315,18 +316,20 @@ export function PostHogProvider({ children }: { children: ReactNode }) {
         const handleSessionEnd = () => {
             trackEvent('session_ended');
         };
-
-        // Track when user leaves the page/tab
-        window.addEventListener('pagehide', handleSessionEnd);
-        window.addEventListener('visibilitychange', () => {
+        const handleVisibilityChange = () => {
             if (document.visibilityState === 'hidden') {
                 handleSessionEnd();
             }
-        });
+        };
+
+        // Track when user leaves the page/tab
+        window.addEventListener('pagehide', handleSessionEnd);
+        window.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
             clearInterval(heartbeatInterval);
             window.removeEventListener('pagehide', handleSessionEnd);
+            window.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [isEnabled, isInitialized, trackEvent]);
 
