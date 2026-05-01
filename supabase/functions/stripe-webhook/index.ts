@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { capturePostHog } from "../_shared/posthog.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
     apiVersion: "2024-06-20",
@@ -13,32 +14,6 @@ const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 // Use Service Role to bypass RLS when updating subscriptions
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
-
-async function capturePostHog(event: string, distinctId: string | undefined, properties: Record<string, unknown> = {}) {
-    const apiKey = Deno.env.get("POSTHOG_PROJECT_API_KEY");
-    const host = (Deno.env.get("POSTHOG_HOST") || "").replace(/\/$/, "");
-    if (!apiKey || !host) return;
-
-    try {
-        await fetch(`${host}/capture/`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                api_key: apiKey,
-                event,
-                distinct_id: distinctId || "server",
-                properties: {
-                    funnel: "tiktok_pruefungscheck",
-                    funnel_version: "2026-04-29",
-                    source: "stripe_webhook",
-                    ...properties,
-                },
-            }),
-        });
-    } catch (error) {
-        console.error(`[posthog] Failed to capture ${event}:`, error);
-    }
-}
 
 // =====================================================
 // IDEMPOTENCY: Check if event was already processed
@@ -201,7 +176,21 @@ serve(async (req) => {
             case "checkout.session.async_payment_failed": {
                 const session = event.data.object as Stripe.Checkout.Session;
                 console.log(`[webhook] Async payment FAILED: ${session.id}`);
+                await capturePostHog("payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
+                    tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+                    checkout_session_id: session.id,
+                    payment_status: session.payment_status,
+                    plan: session.metadata?.plan_type,
+                    checkout_mode: session.metadata?.guest_checkout === "true" ? "guest" : "authenticated",
+                    email: session.customer_email,
+                    source: "stripe_webhook",
+                    stripe_event_id: event.id,
+                    stripe_event_type: event.type,
+                });
                 await capturePostHog("tiktok_payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
+                    funnel: "tiktok_pruefungscheck",
+                    funnel_version: "2026-04-29",
+                    source: "stripe_webhook",
                     tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
                     checkout_session_id: session.id,
                     payment_status: session.payment_status,
@@ -295,6 +284,15 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     }
 
     console.log(`[webhook] handleCheckoutSessionCompleted: userId=${userId}, mode=${session.mode}, plan=${planType}`);
+    await capturePostHog("payment_succeeded_server", userId, {
+        checkout_session_id: session.id,
+        payment_status: session.payment_status,
+        plan: planType,
+        checkout_mode: session.metadata?.guest_checkout === "true" ? "guest" : "authenticated",
+        email: session.customer_email,
+        source: "stripe_webhook",
+        tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+    });
 
     // Handle subscription mode
     if (session.mode === 'subscription' && subscriptionId) {
@@ -328,6 +326,9 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         console.log(`[webhook] One-time payment recorded for user ${userId}`);
         if (session.metadata?.tiktok_lernplan_id) {
             await capturePostHog("tiktok_payment_succeeded_server", userId, {
+                funnel: "tiktok_pruefungscheck",
+                funnel_version: "2026-04-29",
+                source: "stripe_webhook",
                 tiktok_lernplan_id: session.metadata.tiktok_lernplan_id,
                 checkout_session_id: session.id,
                 payment_status: session.payment_status,
@@ -387,6 +388,28 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
         plan: subscription.metadata?.plan_type || 'monthly',
         currentPeriodEnd: new Date(subscription.current_period_end * 1000),
     });
+
+    await capturePostHog("subscription_updated_server", userId, {
+        provider_subscription_id: subscription.id,
+        provider_customer_id: subscription.customer as string,
+        status: effectiveStatus,
+        plan: subscription.metadata?.plan_type || 'monthly',
+        current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+        cancel_at_period_end: subscription.cancel_at_period_end,
+        source: "stripe_webhook",
+    });
+
+    if (effectiveStatus === "canceled") {
+        await capturePostHog("subscription_canceled_server", userId, {
+            provider_subscription_id: subscription.id,
+            provider_customer_id: subscription.customer as string,
+            status: effectiveStatus,
+            plan: subscription.metadata?.plan_type || 'monthly',
+            current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+            cancel_at_period_end: subscription.cancel_at_period_end,
+            source: "stripe_webhook",
+        });
+    }
 }
 
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
@@ -407,6 +430,13 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
         .eq('user_id', userId);
 
     console.log(`[webhook] Subscription deleted for user ${userId}`);
+    await capturePostHog("subscription_canceled_server", userId, {
+        provider_subscription_id: subscription.id,
+        provider_customer_id: subscription.customer as string,
+        status: "canceled",
+        plan: subscription.metadata?.plan_type || 'monthly',
+        source: "stripe_webhook",
+    });
 }
 
 async function handleInvoicePaid(invoice: Stripe.Invoice) {
@@ -432,6 +462,15 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
         });
 
         console.log(`[webhook] Renewed subscription for user ${userId}`);
+        await capturePostHog("subscription_updated_server", userId, {
+            provider_subscription_id: subscription.id,
+            provider_customer_id: subscription.customer as string,
+            status: "active",
+            plan: subscription.metadata?.plan_type || 'monthly',
+            current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+            source: "stripe_webhook",
+            stripe_invoice_id: invoice.id,
+        });
     }
 }
 
@@ -457,6 +496,12 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
         console.error("[webhook] Error setting past_due:", error);
     } else {
         console.log(`[webhook] Marked user ${userId} as past_due due to payment failure`);
+        await capturePostHog("payment_failed_server", userId, {
+            status: "past_due",
+            provider_customer_id: invoice.customer as string,
+            source: "stripe_webhook",
+            stripe_invoice_id: invoice.id,
+        });
     }
 }
 

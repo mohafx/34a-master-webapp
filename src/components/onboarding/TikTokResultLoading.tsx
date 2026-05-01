@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../../App';
 import { Loader2 } from 'lucide-react';
 import { usePostHog } from '../../contexts/PostHogProvider';
-import { getTikTokAnalyticsContext } from '../../utils/tiktokAnalytics';
+import { getTikTokAnalyticsContext, trackTikTokServerEvent } from '../../utils/tiktokAnalytics';
 
 const LOADING_TEXTS = [
     { 
@@ -41,10 +41,14 @@ export default function TikTokResultLoading() {
         const startTime = Date.now();
         let lastTrackedStep = -1;
 
-        trackEvent('tiktok_analysis_started', getTikTokAnalyticsContext('analysis_loading', language, {
+        const startedContext = getTikTokAnalyticsContext('analysis_loading', language, {
             steps_count: LOADING_TEXTS.length,
             expected_duration_ms: totalDuration,
-        }));
+            answered_questions: Object.keys(testData.selectedAnswers || {}).length,
+            total_questions: Array.isArray(testData.questions) ? testData.questions.length : 0,
+        });
+        trackEvent('tiktok_analysis_started', startedContext);
+        trackTikTokServerEvent('tiktok_analysis_started', startedContext);
 
         const interval = setInterval(() => {
             const elapsed = Date.now() - startTime;
@@ -66,19 +70,26 @@ export default function TikTokResultLoading() {
             setTextIndex(foundIndex);
             if (foundIndex !== lastTrackedStep) {
                 lastTrackedStep = foundIndex;
-                trackEvent('tiktok_analysis_step_viewed', getTikTokAnalyticsContext('analysis_loading', language, {
+                const stepContext = getTikTokAnalyticsContext('analysis_loading', language, {
                     step_index: foundIndex + 1,
                     steps_count: LOADING_TEXTS.length,
                     elapsed_ms: elapsed,
-                }));
+                    step_label: LOADING_TEXTS[foundIndex].de,
+                });
+                trackEvent('tiktok_analysis_step_viewed', stepContext);
+                trackTikTokServerEvent('tiktok_analysis_step_viewed', stepContext);
             }
 
             if (elapsed >= totalDuration) {
                 clearInterval(interval);
-                trackEvent('tiktok_analysis_completed', getTikTokAnalyticsContext('analysis_loading', language, {
+                const completedContext = getTikTokAnalyticsContext('analysis_loading', language, {
                     duration_ms: Date.now() - startTime,
                     steps_count: LOADING_TEXTS.length,
-                }));
+                    answered_questions: Object.keys(testData.selectedAnswers || {}).length,
+                    total_questions: Array.isArray(testData.questions) ? testData.questions.length : 0,
+                });
+                trackEvent('tiktok_analysis_completed', completedContext);
+                trackTikTokServerEvent('tiktok_analysis_completed', completedContext);
                 navigate('/tiktok/result', { state: testData, replace: true });
             }
         }, 50);

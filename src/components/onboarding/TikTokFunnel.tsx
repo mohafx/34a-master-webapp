@@ -3,7 +3,7 @@ import { ClipboardList, Gift, Languages, UserX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import { useApp } from '../../App';
-import { getTikTokAnalyticsContext, resetTikTokFunnelSession } from '../../utils/tiktokAnalytics';
+import { getTikTokAnalyticsContext, resetTikTokFunnelSession, trackTikTokServerEvent } from '../../utils/tiktokAnalytics';
 
 export default function TikTokFunnel() {
     const navigate = useNavigate();
@@ -18,7 +18,9 @@ export default function TikTokFunnel() {
         resetTikTokFunnelSession();
         const context = getTikTokAnalyticsContext('start', language, { source: 'tiktok' });
         trackEvent('tiktok_funnel_viewed', context);
+        trackTikTokServerEvent('tiktok_funnel_viewed', context);
         trackEvent('tiktok_funnel_started', context);
+        trackTikTokServerEvent('tiktok_funnel_started', context);
     }, [trackEvent, language]);
 
     const isAr = language === 'DE_AR';
@@ -90,6 +92,7 @@ export default function TikTokFunnel() {
                                         if (!isAr) return;
                                         trackEvent('language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE' }));
                                         trackEvent('tiktok_language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE' }));
+                                        trackTikTokServerEvent('tiktok_language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE' }));
                                         toggleLanguage();
                                     }}
                                     className={`relative z-10 px-6.5 py-1.5 text-[13.3px] font-extrabold transition-colors duration-300 flex items-center justify-center min-w-[85px] ${!isAr ? 'text-[#0F172A]' : 'text-slate-400'}`}
@@ -101,6 +104,7 @@ export default function TikTokFunnel() {
                                         if (isAr) return;
                                         trackEvent('language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE_AR' }));
                                         trackEvent('tiktok_language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE_AR' }));
+                                        trackTikTokServerEvent('tiktok_language_toggled', getTikTokAnalyticsContext('start', language, { from_language: language, to_language: 'DE_AR' }));
                                         toggleLanguage();
                                     }}
                                     className={`relative z-10 px-6.5 py-1.5 text-[15.2px] font-extrabold transition-colors duration-300 flex items-center justify-center gap-2 min-w-[104px] ${isAr ? 'text-[#3B65F5]' : 'text-slate-400'}`}
@@ -149,9 +153,11 @@ export default function TikTokFunnel() {
 
                             <button
                                 onClick={() => {
-                                    trackEvent('tiktok_funnel_cta_clicked', getTikTokAnalyticsContext('start', language, {
+                                    const context = getTikTokAnalyticsContext('start', language, {
                                         cta: 'pruefungscheck_starten',
-                                    }));
+                                    });
+                                    trackEvent('tiktok_funnel_cta_clicked', context);
+                                    trackTikTokServerEvent('tiktok_funnel_cta_clicked', context);
                                     navigate('/tiktok/loading');
                                 }}
                                 className="w-full font-black min-h-[57px] px-6 rounded-[28px] text-[17.1px] transition-all flex flex-col items-center justify-center bg-[#3B65F5] hover:bg-[#3256D6] text-white active:scale-[0.98] shadow-lg shadow-blue-500/20 relative overflow-hidden group/btn py-2"

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../App';
 import { Loader2 } from 'lucide-react';
 import { usePostHog } from '../../contexts/PostHogProvider';
-import { getTikTokAnalyticsContext } from '../../utils/tiktokAnalytics';
+import { getTikTokAnalyticsContext, trackTikTokServerEvent } from '../../utils/tiktokAnalytics';
 
 const LOADING_TEXTS = [
     { de: 'Prüfungsfragen werden geladen...', ar: 'يتم تحميل أسئلة الامتحان...' },
@@ -24,9 +24,11 @@ export default function TikTokTestLoading() {
     // Fetch questions in the background
     useEffect(() => {
         const loadingStartedAt = Date.now();
-        trackEvent('tiktok_questions_loading_started', getTikTokAnalyticsContext('questions_loading', language, {
+        const startContext = getTikTokAnalyticsContext('questions_loading', language, {
             topics_requested_count: 9,
-        }));
+        });
+        trackEvent('tiktok_questions_loading_started', startContext);
+        trackTikTokServerEvent('tiktok_questions_loading_started', startContext);
 
         const fetchQuestions = async () => {
             try {
@@ -47,18 +49,23 @@ export default function TikTokTestLoading() {
                 const results = await Promise.all(promises);
                 const questions = results.map(res => res[0]).filter(Boolean);
                 questionsRef.current = questions;
-                trackEvent('tiktok_questions_loading_completed', getTikTokAnalyticsContext('questions_loading', language, {
+                const completedContext = getTikTokAnalyticsContext('questions_loading', language, {
                     duration_ms: Date.now() - loadingStartedAt,
                     questions_loaded_count: questions.length,
                     topics_requested_count: topics.length,
-                }));
+                    topics: topics,
+                });
+                trackEvent('tiktok_questions_loading_completed', completedContext);
+                trackTikTokServerEvent('tiktok_questions_loading_completed', completedContext);
             } catch (error) {
                 console.error("Failed to fetch questions:", error);
-                trackEvent('tiktok_questions_loading_failed', getTikTokAnalyticsContext('questions_loading', language, {
+                const failedContext = getTikTokAnalyticsContext('questions_loading', language, {
                     duration_ms: Date.now() - loadingStartedAt,
                     topics_requested_count: 9,
                     error_message: error instanceof Error ? error.message : 'unknown_error',
-                }));
+                });
+                trackEvent('tiktok_questions_loading_failed', failedContext);
+                trackTikTokServerEvent('tiktok_questions_loading_failed', failedContext);
             }
         };
         fetchQuestions();

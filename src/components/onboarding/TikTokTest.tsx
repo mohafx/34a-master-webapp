@@ -5,7 +5,7 @@ import { ArrowLeft, ChevronRight, CheckCircle2, Clock } from 'lucide-react';
 import { WrittenExamQuestion } from '../../types';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import { getRequiredAnswerCount } from '../../utils/writtenExamAnswers';
-import { getTikTokAnalyticsContext } from '../../utils/tiktokAnalytics';
+import { getTikTokAnalyticsContext, trackTikTokServerEvent } from '../../utils/tiktokAnalytics';
 
 const QUESTION_TIME_SECONDS = 90;
 
@@ -31,7 +31,7 @@ export default function TikTokTest() {
         if (timeLeft <= 0) {
             const question = questions[currentIndex];
             const selections = selectedAnswers[question.id] || [];
-            trackEvent('tiktok_question_timeout', getTikTokAnalyticsContext('test', language, {
+            const context = getTikTokAnalyticsContext('test', language, {
                 question_id: question.id,
                 question_index: currentIndex + 1,
                 total_questions: questions.length,
@@ -39,7 +39,9 @@ export default function TikTokTest() {
                 selected_count: selections.length,
                 time_spent_seconds: QUESTION_TIME_SECONDS,
                 time_left_seconds: 0,
-            }));
+            });
+            trackEvent('tiktok_question_timeout', context);
+            trackTikTokServerEvent('tiktok_question_timeout', context);
             if (currentIndex < questions.length - 1) {
                 setCurrentIndex(prev => prev + 1);
                 setTimeLeft(QUESTION_TIME_SECONDS);
@@ -65,10 +67,14 @@ export default function TikTokTest() {
         if (!questions || questions.length === 0) {
             navigate('/tiktok');
         } else {
-            trackEvent('tiktok_test_started', getTikTokAnalyticsContext('test', language, {
+            const context = getTikTokAnalyticsContext('test', language, {
                 total_questions: questions.length,
                 question_time_seconds: QUESTION_TIME_SECONDS,
-            }));
+                question_ids: questions.map(question => question.id),
+                topics: questions.map(question => question.topic),
+            });
+            trackEvent('tiktok_test_started', context);
+            trackTikTokServerEvent('tiktok_test_started', context);
         }
     }, [questions, navigate, trackEvent, language]);
 
@@ -81,7 +87,7 @@ export default function TikTokTest() {
 
     useEffect(() => {
         questionStartedAtRef.current = Date.now();
-        trackEvent('tiktok_question_viewed', getTikTokAnalyticsContext('test', language, {
+        const context = getTikTokAnalyticsContext('test', language, {
             question_id: currentQuestion.id,
             question_index: currentIndex + 1,
             total_questions: questions.length,
@@ -89,7 +95,9 @@ export default function TikTokTest() {
             answer_count: Object.values(currentQuestion.answers).filter(Boolean).length,
             required_answer_count: requiredAnswerCount,
             is_multiple_choice: isMultipleChoice,
-        }));
+        });
+        trackEvent('tiktok_question_viewed', context);
+        trackTikTokServerEvent('tiktok_question_viewed', context);
     }, [currentQuestion.id, currentIndex, questions.length, language, trackEvent, requiredAnswerCount, isMultipleChoice]);
 
     const handleSelectAnswer = (key: string) => {
@@ -112,7 +120,8 @@ export default function TikTokTest() {
             [currentQuestion.id]: sortedSelections
         });
 
-        trackEvent(previousSelectedCount > 0 ? 'tiktok_answer_changed' : 'tiktok_answer_selected', getTikTokAnalyticsContext('test', language, {
+        const eventName = previousSelectedCount > 0 ? 'tiktok_answer_changed' : 'tiktok_answer_selected';
+        const context = getTikTokAnalyticsContext('test', language, {
             question_id: currentQuestion.id,
             question_index: currentIndex + 1,
             total_questions: questions.length,
@@ -122,17 +131,23 @@ export default function TikTokTest() {
             is_multiple_choice: isMultipleChoice,
             time_spent_seconds: Math.round((Date.now() - questionStartedAtRef.current) / 1000),
             time_left_seconds: timeLeft,
-        }));
+            selected_answers: sortedSelections,
+        });
+        trackEvent(eventName, context);
+        trackTikTokServerEvent(eventName, context);
     };
 
     const handleComplete = (reason: 'manual' | 'timeout' = 'manual') => {
         if (completedRef.current) return;
         completedRef.current = true;
-        trackEvent('tiktok_test_completed', getTikTokAnalyticsContext('test', language, {
+        const context = getTikTokAnalyticsContext('test', language, {
             reason,
             total_questions: questions.length,
             answered_questions: Object.keys(selectedAnswers).length,
-        }));
+            skipped_questions: questions.length - Object.keys(selectedAnswers).length,
+        });
+        trackEvent('tiktok_test_completed', context);
+        trackTikTokServerEvent('tiktok_test_completed', context);
         navigate('/tiktok/analyzing', { 
             state: { 
                 questions, 
@@ -142,7 +157,7 @@ export default function TikTokTest() {
     };
 
     const handleNext = () => {
-        trackEvent('tiktok_question_next_clicked', getTikTokAnalyticsContext('test', language, {
+        const context = getTikTokAnalyticsContext('test', language, {
             question_id: currentQuestion.id,
             question_index: currentIndex + 1,
             total_questions: questions.length,
@@ -153,7 +168,9 @@ export default function TikTokTest() {
             time_spent_seconds: Math.round((Date.now() - questionStartedAtRef.current) / 1000),
             time_left_seconds: timeLeft,
             is_last_question: currentIndex === questions.length - 1,
-        }));
+        });
+        trackEvent('tiktok_question_next_clicked', context);
+        trackTikTokServerEvent('tiktok_question_next_clicked', context);
         if (currentIndex < questions.length - 1) {
             setCurrentIndex(currentIndex + 1);
             setTimeLeft(QUESTION_TIME_SECONDS);

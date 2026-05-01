@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { supabase } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import { useDevPanel } from '../devpanel/DevPanelContext';
+import { trackServerEvent } from '../services/serverAnalytics';
 
 interface AuthContextType {
     user: User | null;
@@ -124,15 +125,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 id: data.user.id,
                 display_name: displayName
             });
+
+            trackServerEvent('user_signed_up_server', {
+                email: data.user.email,
+                method: 'email',
+                display_name_present: Boolean(displayName),
+                email_confirmed: Boolean(data.user.email_confirmed_at),
+                source: 'auth_dialog',
+            });
         }
     };
 
     const signIn = async (email: string, password: string) => {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
             email,
             password
         });
         if (error) throw error;
+
+        if (data.user) {
+            trackServerEvent('user_logged_in_server', {
+                email: data.user.email,
+                method: 'email',
+                source: 'auth_dialog',
+            });
+        }
     };
 
     const signInWithGoogle = async () => {

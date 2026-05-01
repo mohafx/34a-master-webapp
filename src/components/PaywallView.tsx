@@ -4,7 +4,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useApp } from '../App';
 import { usePostHog } from '../contexts/PostHogProvider';
 import { supabase } from '../lib/supabase';
-import { getEmailDomain, getTikTokAnalyticsContext } from '../utils/tiktokAnalytics';
+import { getEmailDomain, getTikTokAnalyticsContext, trackTikTokServerEvent } from '../utils/tiktokAnalytics';
+import { trackServerEvent } from '../services/serverAnalytics';
 import { X, Crown, Check, MessageCircle, Lightbulb, Infinity, ShieldCheck, Rocket, Languages, ChevronDown, Users, BookOpen, Timer, Blocks, Calendar, Mic, Sparkles, Pencil, GraduationCap, Layers, Target, Trophy, Mail, LogIn, Eye, EyeOff } from 'lucide-react';
 import { EmbeddedPayment } from './EmbeddedPayment';
 import { TransitionAccessNotice } from './TransitionAccessNotice';
@@ -132,6 +133,11 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         weak_topic_count: tiktokAnalytics.weakTopicCount,
         ...extra,
     });
+    const trackTikTokPaywallEvent = (eventName: `tiktok_${string}`, extra: Record<string, any> = {}) => {
+        const context = getTikTokPaywallContext(extra);
+        trackEvent(eventName as any, context);
+        trackTikTokServerEvent(eventName, context);
+    };
 
     const selectedPlan = '6months';
     const [loading, setLoading] = useState(false);
@@ -181,7 +187,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
             source: isEmbedded ? 'onboarding' : 'dialog'
         });
         if (isTikTokPaywall) {
-            trackEvent('tiktok_paywall_opened', getTikTokPaywallContext());
+            trackTikTokPaywallEvent('tiktok_paywall_opened');
         }
     }, []);
 
@@ -213,9 +219,9 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
             if (secret && typeof secret === 'string' && secret.length > 0) {
                 setClientSecret(secret);
                 if (isTikTokPaywall) {
-                    trackEvent('tiktok_checkout_session_created', getTikTokPaywallContext({
+                    trackTikTokPaywallEvent('tiktok_checkout_session_created', {
                         checkout_mode: 'authenticated',
-                    }));
+                    });
                 }
             } else {
                 throw new Error('Invalid session created');
@@ -223,11 +229,11 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         } catch (err: any) {
             console.error('Checkout error:', err);
             if (isTikTokPaywall) {
-                trackEvent('tiktok_checkout_poll_failed', getTikTokPaywallContext({
+                trackTikTokPaywallEvent('tiktok_checkout_poll_failed', {
                     checkout_mode: 'authenticated',
                     reason: 'session_create_failed',
                     error_message: err?.message,
-                }));
+                });
             }
             setError('Ein Fehler ist aufgetreten. Bitte versuche es später erneut oder kontaktiere den Support.');
         } finally {
@@ -240,20 +246,20 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         if (!guestEmail || !guestEmail.includes('@')) {
             setGuestError('Bitte gib eine gültige E-Mail-Adresse ein.');
             if (isTikTokPaywall) {
-                trackEvent('tiktok_guest_email_failed', getTikTokPaywallContext({
+                trackTikTokPaywallEvent('tiktok_guest_email_failed', {
                     reason: 'invalid_email',
                     has_email: Boolean(guestEmail),
-                }));
+                });
             }
             return;
         }
         setLoading(true);
         setGuestError('');
         if (isTikTokPaywall) {
-            trackEvent('tiktok_guest_email_submitted', getTikTokPaywallContext({
+            trackTikTokPaywallEvent('tiktok_guest_email_submitted', {
                 has_email: true,
                 email_domain: getEmailDomain(guestEmail),
-            }));
+            });
         }
         try {
             const { data, error: fnError } = await supabase.functions.invoke('create-guest-checkout', {
@@ -268,9 +274,9 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                 setGuestMode('login');
                 setGuestError('Diese E-Mail hat bereits ein Konto. Bitte melde dich an.');
                 if (isTikTokPaywall) {
-                    trackEvent('tiktok_existing_account_login_prompted', getTikTokPaywallContext({
+                    trackTikTokPaywallEvent('tiktok_existing_account_login_prompted', {
                         email_domain: getEmailDomain(guestEmail),
-                    }));
+                    });
                 }
                 return;
             }
@@ -280,20 +286,20 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
             setClientSecret(data.clientSecret);
             setGuestMode(null);
             if (isTikTokPaywall) {
-                trackEvent('tiktok_checkout_session_created', getTikTokPaywallContext({
+                trackTikTokPaywallEvent('tiktok_checkout_session_created', {
                     checkout_mode: 'guest',
                     email_domain: getEmailDomain(guestEmail),
-                }));
+                });
             }
         } catch (err: any) {
             console.error('Guest checkout error:', err);
             setGuestError(err.message || 'Ein Fehler ist aufgetreten. Bitte versuche es erneut.');
             if (isTikTokPaywall) {
-                trackEvent('tiktok_guest_email_failed', getTikTokPaywallContext({
+                trackTikTokPaywallEvent('tiktok_guest_email_failed', {
                     reason: 'checkout_create_failed',
                     error_message: err?.message,
                     email_domain: getEmailDomain(guestEmail),
-                }));
+                });
             }
         } finally {
             setLoading(false);
@@ -309,11 +315,18 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         setLoginLoading(true);
         setGuestError('');
         try {
-            const { error: signInError } = await supabase.auth.signInWithPassword({
+            const { data, error: signInError } = await supabase.auth.signInWithPassword({
                 email: loginEmail.trim().toLowerCase(),
                 password: loginPassword,
             });
             if (signInError) throw signInError;
+            if (data.user) {
+                trackServerEvent('user_logged_in_server', {
+                    email: data.user.email,
+                    method: 'email',
+                    source: 'paywall_inline_login',
+                });
+            }
             // User is now logged in — close guest mode and proceed normally
             setGuestMode(null);
             // Small delay so auth state can update, then proceed
@@ -331,10 +344,10 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
             setShakeTerms(true);
             setTimeout(() => setShakeTerms(false), 500);
             if (isTikTokPaywall) {
-                trackEvent('tiktok_paywall_checkout_clicked', getTikTokPaywallContext({
+                trackTikTokPaywallEvent('tiktok_paywall_checkout_clicked', {
                     blocked: true,
                     blocked_reason: 'terms_not_accepted',
-                }));
+                });
             }
             return;
         }
@@ -345,10 +358,10 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
             source: isEmbedded ? 'onboarding' : 'paywall_dialog'
         });
         if (isTikTokPaywall) {
-            trackEvent('tiktok_paywall_checkout_clicked', getTikTokPaywallContext({
+            trackTikTokPaywallEvent('tiktok_paywall_checkout_clicked', {
                 blocked: false,
                 checkout_mode: user ? 'authenticated' : 'guest',
-            }));
+            });
         }
 
         if (user) {
@@ -359,7 +372,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
             setGuestMode('email');
             setGuestError('');
             if (isTikTokPaywall) {
-                trackEvent('tiktok_guest_email_started', getTikTokPaywallContext());
+                trackTikTokPaywallEvent('tiktok_guest_email_started');
             }
         }
     };
@@ -367,10 +380,10 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
     const handlePaymentComplete = async () => {
         setSuccessMode(true);
         if (isTikTokPaywall) {
-            trackEvent('tiktok_checkout_completed_client', getTikTokPaywallContext({
+            trackTikTokPaywallEvent('tiktok_checkout_completed_client', {
                 checkout_mode: user ? 'authenticated' : 'guest',
                 completion_source: 'paywall',
-            }));
+            });
         }
         if (user) {
             await processPaymentSuccess();
@@ -633,9 +646,9 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                             const nextAccepted = !hasAcceptedTerms;
                                             setHasAcceptedTerms(nextAccepted);
                                             if (isTikTokPaywall) {
-                                                trackEvent('tiktok_paywall_terms_toggled', getTikTokPaywallContext({
+                                                trackTikTokPaywallEvent('tiktok_paywall_terms_toggled', {
                                                     accepted: nextAccepted,
-                                                }));
+                                                });
                                             }
                                         }}
                                         className={`w-4 h-4 rounded border shrink-0 mt-0.5 ${hasAcceptedTerms ? 'bg-blue-600 border-blue-600' : 'border-slate-300 dark:border-slate-600 dark:bg-slate-900'}`}
@@ -648,9 +661,9 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                             const nextAccepted = !hasAcceptedTerms;
                                             setHasAcceptedTerms(nextAccepted);
                                             if (isTikTokPaywall) {
-                                                trackEvent('tiktok_paywall_terms_toggled', getTikTokPaywallContext({
+                                                trackTikTokPaywallEvent('tiktok_paywall_terms_toggled', {
                                                     accepted: nextAccepted,
-                                                }));
+                                                });
                                             }
                                         }}
                                     >

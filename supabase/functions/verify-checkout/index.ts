@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { capturePostHog } from "../_shared/posthog.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
     apiVersion: "2024-06-20",
@@ -16,32 +17,6 @@ const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     { auth: { autoRefreshToken: false, persistSession: false } }
 );
-
-async function capturePostHog(event: string, distinctId: string | undefined, properties: Record<string, unknown> = {}) {
-    const apiKey = Deno.env.get("POSTHOG_PROJECT_API_KEY");
-    const host = (Deno.env.get("POSTHOG_HOST") || "").replace(/\/$/, "");
-    if (!apiKey || !host) return;
-
-    try {
-        await fetch(`${host}/capture/`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                api_key: apiKey,
-                event,
-                distinct_id: distinctId || "server",
-                properties: {
-                    funnel: "tiktok_pruefungscheck",
-                    funnel_version: "2026-04-29",
-                    source: "verify_checkout",
-                    ...properties,
-                },
-            }),
-        });
-    } catch (error) {
-        console.error(`[posthog] Failed to capture ${event}:`, error);
-    }
-}
 
 async function activateTikTokLernplan(tiktokLernplanId: string | undefined, userId: string | undefined): Promise<void> {
     if (!tiktokLernplanId || !userId) return;
@@ -110,7 +85,19 @@ serve(async (req) => {
             session.payment_status === 'paid';
 
         if (isSuccess) {
+            await capturePostHog("payment_succeeded_server", session.client_reference_id || session.metadata?.user_id, {
+                tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+                checkout_session_id: session.id,
+                payment_status: session.payment_status,
+                plan: session.metadata?.plan_type,
+                checkout_mode: session.metadata?.guest_checkout === "true" ? "guest" : "authenticated",
+                email: session.customer_email,
+                source: "verify_checkout",
+            });
             await capturePostHog("tiktok_payment_succeeded_server", session.client_reference_id || session.metadata?.user_id, {
+                funnel: "tiktok_pruefungscheck",
+                funnel_version: "2026-04-29",
+                source: "verify_checkout",
                 tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
                 checkout_session_id: session.id,
                 payment_status: session.payment_status,
@@ -120,13 +107,27 @@ serve(async (req) => {
                 session.metadata?.tiktok_lernplan_id,
                 session.client_reference_id || session.metadata?.user_id,
             );
-        } else if (session.metadata?.tiktok_lernplan_id) {
-            await capturePostHog("tiktok_payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
-                tiktok_lernplan_id: session.metadata.tiktok_lernplan_id,
+        } else {
+            await capturePostHog("payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
+                tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
                 checkout_session_id: session.id,
                 payment_status: session.payment_status,
-                plan_status: "pending_payment",
+                plan: session.metadata?.plan_type,
+                checkout_mode: session.metadata?.guest_checkout === "true" ? "guest" : "authenticated",
+                email: session.customer_email,
+                source: "verify_checkout",
             });
+            if (session.metadata?.tiktok_lernplan_id) {
+                await capturePostHog("tiktok_payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
+                    funnel: "tiktok_pruefungscheck",
+                    funnel_version: "2026-04-29",
+                    source: "verify_checkout",
+                    tiktok_lernplan_id: session.metadata.tiktok_lernplan_id,
+                    checkout_session_id: session.id,
+                    payment_status: session.payment_status,
+                    plan_status: "pending_payment",
+                });
+            }
         }
 
         // Get subscription status if exists

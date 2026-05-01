@@ -1,4 +1,5 @@
 import type { AnalyticsEventProperties } from '../contexts/PostHogProvider';
+import { trackServerEvent } from '../services/serverAnalytics';
 
 export const TIKTOK_FUNNEL_NAME = 'tiktok_pruefungscheck';
 export const TIKTOK_FUNNEL_VERSION = '2026-04-29';
@@ -45,4 +46,8 @@ export function getTikTokAnalyticsContext(
 
 export function getEmailDomain(email: string): string | undefined {
     return email.trim().toLowerCase().split('@')[1] || undefined;
+}
+
+export function trackTikTokServerEvent(eventName: `tiktok_${string}`, properties: AnalyticsEventProperties): void {
+    trackServerEvent(eventName, properties);
 }

@@ -8,7 +8,7 @@ import { PaywallDialog } from '../PaywallDialog';
 import { areAnswerSetsEqual } from '../../utils/writtenExamAnswers';
 import { useDataCache } from '../../contexts/DataCacheContext';
 import { generateTikTokLernplan, TikTokLernplanNode } from '../../services/lernplanGenerator';
-import { getTikTokAnalyticsContext } from '../../utils/tiktokAnalytics';
+import { getTikTokAnalyticsContext, trackTikTokServerEvent } from '../../utils/tiktokAnalytics';
 
 interface ResultState {
     questions: WrittenExamQuestion[];
@@ -155,13 +155,15 @@ export default function TikTokTestResult() {
             weak_topics: displayedWeakTopics,
         });
         trackEvent('tiktok_result_viewed', context);
+        trackTikTokServerEvent('tiktok_result_viewed', context);
         trackEvent('tiktok_weak_topics_shown', context);
+        trackTikTokServerEvent('tiktok_weak_topics_shown', context);
     }, [state?.questions, language, trackEvent, actualScore, actualPercentage, errorsTotal, totalQuestions, riskStatus.level, weakTopicKey]);
 
     useEffect(() => {
         if (!tiktokPlan || planPreviewTrackedRef.current) return;
         planPreviewTrackedRef.current = true;
-        trackEvent('tiktok_plan_preview_viewed', getTikTokAnalyticsContext('result', language, {
+        const context = getTikTokAnalyticsContext('result', language, {
             score: actualScore,
             percentage: actualPercentage,
             wrong_count: errorsTotal,
@@ -170,7 +172,9 @@ export default function TikTokTestResult() {
             weak_topic_count: displayedWeakTopics.length,
             weak_topics: displayedWeakTopics,
             plan_days_count: learningPlanDays.length,
-        }));
+        });
+        trackEvent('tiktok_plan_preview_viewed', context);
+        trackTikTokServerEvent('tiktok_plan_preview_viewed', context);
     }, [tiktokPlan, language, trackEvent, actualScore, actualPercentage, errorsTotal, totalQuestions, riskStatus.level, weakTopicKey, learningPlanDays.length]);
     
     const radius = 60;
@@ -191,7 +195,9 @@ export default function TikTokTestResult() {
             plan_days_count: learningPlanDays.length,
         });
         trackEvent('tiktok_plan_unlock_clicked', context);
+        trackTikTokServerEvent('tiktok_plan_unlock_clicked', context);
         trackEvent('tiktok_result_register_clicked', context);
+        trackTikTokServerEvent('tiktok_result_register_clicked', context);
         setShowPaywall(true);
     };
 
@@ -419,7 +425,7 @@ export default function TikTokTestResult() {
                                 <div className="pt-3 flex justify-center">
                                     <button
                                         onClick={() => {
-                                            trackEvent('tiktok_basis_continue_clicked', getTikTokAnalyticsContext('result', language, {
+                                            const context = getTikTokAnalyticsContext('result', language, {
                                                 score: actualScore,
                                                 percentage: actualPercentage,
                                                 wrong_count: errorsTotal,
@@ -427,7 +433,9 @@ export default function TikTokTestResult() {
                                                 risk_level: riskStatus.level,
                                                 weak_topic_count: displayedWeakTopics.length,
                                                 weak_topics: displayedWeakTopics,
-                                            }));
+                                            });
+                                            trackEvent('tiktok_basis_continue_clicked', context);
+                                            trackTikTokServerEvent('tiktok_basis_continue_clicked', context);
                                             navigate('/dashboard');
                                         }}
                                         className="inline-flex items-center justify-center px-3 py-2 text-center text-[12px] font-bold leading-snug text-slate-400 underline underline-offset-4 decoration-slate-300 transition-colors hover:text-slate-600 hover:decoration-slate-500"

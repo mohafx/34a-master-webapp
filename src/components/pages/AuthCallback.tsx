@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import { trackOAuthLoginOnce } from '../../services/serverAnalytics';
 
 export default function AuthCallback() {
     const navigate = useNavigate();
@@ -21,6 +22,11 @@ export default function AuthCallback() {
 
                 if (session) {
                     console.log('OAuth successful, user logged in');
+                    trackOAuthLoginOnce(session.user.id, {
+                        email: session.user.email,
+                        method: session.user.app_metadata?.provider || 'google',
+                        source: 'oauth_callback',
+                    });
                     // Redirect to dashboard on success
                     navigate('/dashboard');
                 } else {
