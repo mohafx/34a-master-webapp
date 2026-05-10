@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { EmbeddedCheckoutProvider, EmbeddedCheckout } from '@stripe/react-stripe-js';
-import { loadStripe, Stripe } from '@stripe/stripe-js';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { loadStripe, Stripe, StripeEmbeddedCheckout } from '@stripe/stripe-js';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { usePostHog, type AnalyticsEventProperties } from '../contexts/PostHogProvider';
@@ -18,16 +17,29 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const onCompleteCalledRef = useRef(false);
-    const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const initialSubscriptionCheckedRef = useRef(false);
     const hadSubscriptionOnMountRef = useRef(false);
+    const checkoutContainerRef = useRef<HTMLDivElement | null>(null);
+    const embeddedCheckoutRef = useRef<StripeEmbeddedCheckout | null>(null);
+    const stripeMountNodeRef = useRef<HTMLDivElement | null>(null);
+    const isMountedRef = useRef(false);
+    const onCompleteRef = useRef(onComplete);
+    const trackingContextRef = useRef(trackingContext);
 
     useEffect(() => {
+        onCompleteRef.current = onComplete;
+        trackingContextRef.current = trackingContext;
+    }, [onComplete, trackingContext]);
+
+    useEffect(() => {
+        isMountedRef.current = true;
         const sessionId = clientSecret.split('_secret_')[0];
         console.log('[EmbeddedPayment] Mounted, session:', sessionId);
-        if (trackingContext) {
+        const currentTrackingContext = trackingContextRef.current;
+        if (currentTrackingContext) {
             const context = {
-                ...trackingContext,
+                ...currentTrackingContext,
                 checkout_session_id: sessionId,
             };
             trackEvent('tiktok_checkout_embedded_loaded', context);
@@ -37,11 +49,14 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
         const key = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 
         if (!key) {
-            setError("Stripe ist nicht konfiguriert. Bitte kontaktiere den Support.");
-            setLoading(false);
-            if (trackingContext) {
+            if (isMountedRef.current) {
+                setError("Stripe ist nicht konfiguriert. Bitte kontaktiere den Support.");
+                setLoading(false);
+            }
+            const currentTrackingContext = trackingContextRef.current;
+            if (currentTrackingContext) {
                 const context = {
-                    ...trackingContext,
+                    ...currentTrackingContext,
                     checkout_session_id: sessionId,
                     reason: 'missing_stripe_key',
                 };
@@ -72,10 +87,13 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
 
             promise.then((stripe) => {
                 if (!stripe) {
-                    setError("Stripe konnte nicht geladen werden.");
-                    if (trackingContext) {
+                    if (isMountedRef.current) {
+                        setError("Stripe konnte nicht geladen werden.");
+                    }
+                    const currentTrackingContext = trackingContextRef.current;
+                    if (currentTrackingContext) {
                         const context = {
-                            ...trackingContext,
+                            ...currentTrackingContext,
                             checkout_session_id: sessionId,
                             reason: 'stripe_load_empty',
                         };
@@ -83,14 +101,19 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
                         trackTikTokServerEvent('tiktok_checkout_poll_failed', context);
                     }
                 }
-                setLoading(false);
+                if (isMountedRef.current) {
+                    setLoading(false);
+                }
             }).catch((err) => {
                 console.error("Stripe load error:", err);
-                setError("Stripe konnte nicht geladen werden.");
-                setLoading(false);
-                if (trackingContext) {
+                if (isMountedRef.current) {
+                    setError("Stripe konnte nicht geladen werden.");
+                    setLoading(false);
+                }
+                const currentTrackingContext = trackingContextRef.current;
+                if (currentTrackingContext) {
                     const context = {
-                        ...trackingContext,
+                        ...currentTrackingContext,
                         checkout_session_id: sessionId,
                         reason: 'stripe_load_failed',
                         error_message: err?.message,
@@ -101,11 +124,14 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
             });
         } catch (err) {
             console.error("Stripe init error:", err);
-            setError("Stripe konnte nicht initialisiert werden.");
-            setLoading(false);
-            if (trackingContext) {
+            if (isMountedRef.current) {
+                setError("Stripe konnte nicht initialisiert werden.");
+                setLoading(false);
+            }
+            const currentTrackingContext = trackingContextRef.current;
+            if (currentTrackingContext) {
                 const context = {
-                    ...trackingContext,
+                    ...currentTrackingContext,
                     checkout_session_id: sessionId,
                     reason: 'stripe_init_failed',
                     error_message: err instanceof Error ? err.message : 'Unknown error',
@@ -117,8 +143,9 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
 
         // Cleanup on unmount
         return () => {
-            if (pollingIntervalRef.current) {
-                clearInterval(pollingIntervalRef.current);
+            isMountedRef.current = false;
+            if (pollingTimeoutRef.current) {
+                clearTimeout(pollingTimeoutRef.current);
             }
         };
     }, [clientSecret]);
@@ -134,9 +161,10 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
         const backoffDelays = [3000, 5000, 8000, 12000, 18000]; // Exponential backoff
         const sessionId = clientSecret.split('_secret_')[0];
 
-        if (trackingContext) {
+        const currentTrackingContext = trackingContextRef.current;
+        if (currentTrackingContext) {
             const context = {
-                ...trackingContext,
+                ...currentTrackingContext,
                 checkout_session_id: sessionId,
                 max_polls: maxPolls,
             };
@@ -147,7 +175,7 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
         const checkPaymentStatus = async () => {
             // Wait until initial check is complete
             if (!initialSubscriptionCheckedRef.current) {
-                schedulNextPoll();
+                scheduleNextPoll();
                 return;
             }
 
@@ -162,9 +190,10 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
                 if (hasSubscriptionNow && !hadSubscriptionOnMountRef.current && !onCompleteCalledRef.current) {
                     console.log('[EmbeddedPayment] NEW subscription detected via polling');
                     onCompleteCalledRef.current = true;
-                    if (trackingContext) {
+                    const currentTrackingContext = trackingContextRef.current;
+                    if (currentTrackingContext) {
                         const context = {
-                            ...trackingContext,
+                            ...currentTrackingContext,
                             checkout_session_id: sessionId,
                             poll_count: pollCount,
                         };
@@ -173,8 +202,8 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
                     }
 
                     setTimeout(() => {
-                        if (onComplete) {
-                            onComplete();
+                        if (isMountedRef.current && onCompleteRef.current) {
+                            onCompleteRef.current();
                         }
                     }, 500);
                     return; // Stop polling
@@ -185,12 +214,13 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
 
             // Schedule next poll if not at max
             if (pollCount < maxPolls) {
-                schedulNextPoll();
+                scheduleNextPoll();
             } else {
                 console.log('[EmbeddedPayment] Max polls reached, stopping');
-                if (trackingContext) {
+                const currentTrackingContext = trackingContextRef.current;
+                if (currentTrackingContext) {
                     const context = {
-                        ...trackingContext,
+                        ...currentTrackingContext,
                         checkout_session_id: sessionId,
                         reason: 'max_polls_reached',
                         poll_count: pollCount,
@@ -201,9 +231,9 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
             }
         };
 
-        const schedulNextPoll = () => {
+        const scheduleNextPoll = () => {
             const delay = backoffDelays[Math.min(pollCount, backoffDelays.length - 1)];
-            pollingIntervalRef.current = setTimeout(checkPaymentStatus, delay);
+            pollingTimeoutRef.current = setTimeout(checkPaymentStatus, delay);
         };
 
         // Start first poll after 3s delay
@@ -211,22 +241,23 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
 
         return () => {
             clearTimeout(startDelay);
-            if (pollingIntervalRef.current) {
-                clearTimeout(pollingIntervalRef.current);
+            if (pollingTimeoutRef.current) {
+                clearTimeout(pollingTimeoutRef.current);
             }
         };
-    }, [loading, onComplete]);
+    }, [clientSecret, loading, trackEvent]);
 
-    const handleStripeComplete = () => {
+    const handleStripeComplete = useCallback(() => {
         if (onCompleteCalledRef.current) {
             return; // Already called via polling
         }
 
         console.log('[EmbeddedPayment] Stripe onComplete callback fired');
         onCompleteCalledRef.current = true;
-        if (trackingContext) {
+        const currentTrackingContext = trackingContextRef.current;
+        if (currentTrackingContext) {
             const context = {
-                ...trackingContext,
+                ...currentTrackingContext,
                 checkout_session_id: clientSecret.split('_secret_')[0],
                 completion_source: 'stripe_callback',
             };
@@ -235,17 +266,88 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
         }
 
         // Stop polling since we got the callback
-        if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
+        if (pollingTimeoutRef.current) {
+            clearTimeout(pollingTimeoutRef.current);
         }
 
         // Small delay to show Stripe's success animation
         setTimeout(() => {
-            if (onComplete) {
-                onComplete();
+            if (isMountedRef.current && onCompleteRef.current) {
+                onCompleteRef.current();
             }
         }, 1500);
-    };
+    }, [clientSecret, trackEvent]);
+
+    useEffect(() => {
+        if (loading || !stripePromise || error) return;
+
+        let cancelled = false;
+        const container = checkoutContainerRef.current;
+        if (!container) return;
+
+        const mountNode = document.createElement('div');
+        mountNode.className = 'h-full';
+        container.replaceChildren(mountNode);
+        stripeMountNodeRef.current = mountNode;
+
+        stripePromise
+            .then(async (stripe) => {
+                if (cancelled || !stripe || !stripeMountNodeRef.current) return;
+
+                const embeddedCheckout = await stripe.initEmbeddedCheckout({
+                    clientSecret,
+                    onComplete: handleStripeComplete,
+                });
+
+                if (cancelled || !stripeMountNodeRef.current) {
+                    embeddedCheckout.destroy();
+                    return;
+                }
+
+                embeddedCheckoutRef.current = embeddedCheckout;
+                embeddedCheckout.mount(stripeMountNodeRef.current);
+            })
+            .catch((err) => {
+                console.error("Stripe embedded checkout error:", err);
+                if (!cancelled && isMountedRef.current) {
+                    setError("Stripe konnte nicht geladen werden.");
+                    const currentTrackingContext = trackingContextRef.current;
+                    if (currentTrackingContext) {
+                        const context = {
+                            ...currentTrackingContext,
+                            checkout_session_id: clientSecret.split('_secret_')[0],
+                            reason: 'embedded_checkout_init_failed',
+                            error_message: err?.message,
+                        };
+                        trackEvent('tiktok_checkout_poll_failed', context);
+                        trackTikTokServerEvent('tiktok_checkout_poll_failed', context);
+                    }
+                }
+            });
+
+        return () => {
+            cancelled = true;
+            const embeddedCheckout = embeddedCheckoutRef.current;
+            embeddedCheckoutRef.current = null;
+
+            if (embeddedCheckout) {
+                try {
+                    embeddedCheckout.destroy();
+                } catch (err) {
+                    console.warn('[EmbeddedPayment] Stripe checkout cleanup failed:', err);
+                }
+            }
+
+            if (stripeMountNodeRef.current?.parentNode) {
+                try {
+                    stripeMountNodeRef.current.parentNode.removeChild(stripeMountNodeRef.current);
+                } catch (err) {
+                    console.warn('[EmbeddedPayment] Stripe mount node cleanup failed:', err);
+                }
+            }
+            stripeMountNodeRef.current = null;
+        };
+    }, [clientSecret, error, handleStripeComplete, loading, stripePromise, trackEvent]);
 
     if (error) {
         return (
@@ -271,16 +373,6 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
     }
 
     return (
-        <div id="checkout" className="w-full min-h-[400px]">
-            <EmbeddedCheckoutProvider
-                stripe={stripePromise}
-                options={{
-                    clientSecret,
-                    onComplete: handleStripeComplete
-                }}
-            >
-                <EmbeddedCheckout className="h-full" />
-            </EmbeddedCheckoutProvider>
-        </div>
+        <div id="checkout" ref={checkoutContainerRef} className="w-full min-h-[400px]" />
     );
 };

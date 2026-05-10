@@ -1,4 +1,4 @@
-import { useState, useEffect, cloneElement } from 'react';
+import { useState, useEffect, useRef, cloneElement } from 'react';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useApp } from '../App';
@@ -163,8 +163,8 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
     const [manuallyToggledVS, setManuallyToggledVS] = useState(false);
 
     // Refs for scroll container auto-open
-    const scrollRef = { current: null as HTMLDivElement | null };
-    const vsRef = { current: null as HTMLDivElement | null };
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const vsRef = useRef<HTMLDivElement | null>(null);
 
     const checkScroll = () => {
         if (!scrollRef.current) return;
@@ -215,7 +215,10 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         setLoading(true);
         setError('');
         try {
-            const secret = await openCheckout(selectedPlan, { tiktokPlanPayload });
+            const secret = await openCheckout(selectedPlan, {
+                tiktokPlanPayload,
+                analyticsContext: isTikTokPaywall ? getTikTokPaywallContext({ checkout_mode: 'authenticated' }) : undefined,
+            });
             if (secret && typeof secret === 'string' && secret.length > 0) {
                 setClientSecret(secret);
                 if (isTikTokPaywall) {
@@ -263,7 +266,12 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         }
         try {
             const { data, error: fnError } = await supabase.functions.invoke('create-guest-checkout', {
-                body: { email: guestEmail.trim().toLowerCase(), priceId: selectedPlan, tiktokPlanPayload }
+                body: {
+                    email: guestEmail.trim().toLowerCase(),
+                    priceId: selectedPlan,
+                    tiktokPlanPayload,
+                    analyticsContext: isTikTokPaywall ? getTikTokPaywallContext({ checkout_mode: 'guest' }) : undefined,
+                }
             });
 
             if (fnError) throw new Error(fnError.message);
@@ -379,6 +387,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
 
     const handlePaymentComplete = async () => {
         setSuccessMode(true);
+        const sessionId = clientSecret?.split('_secret_')[0];
         if (isTikTokPaywall) {
             trackTikTokPaywallEvent('tiktok_checkout_completed_client', {
                 checkout_mode: user ? 'authenticated' : 'guest',
@@ -388,8 +397,11 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         if (user) {
             await processPaymentSuccess();
             setTimeout(() => { onClose?.(); }, 2000);
+        } else if (sessionId) {
+            setTimeout(() => {
+                window.location.hash = `/guest-payment-success?session_id=${encodeURIComponent(sessionId)}`;
+            }, 1200);
         }
-        // Guest: redirect happens via return_url to /guest-payment-success
     };
 
     const benefitGroups = [
@@ -450,7 +462,8 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         <div className={`flex flex-col h-full bg-[#F2F4F6] dark:bg-slate-950 ${isEmbedded ? 'w-full' : 'sm:rounded-[3rem] border border-white/50 dark:border-slate-800 shadow-2xl overflow-hidden'}`}>
             <div
                 className={`flex-1 overflow-y-auto relative z-0 ${isEmbedded ? 'px-0 pb-0' : 'px-3 sm:px-4 pb-10'}`}
-                ref={(el) => { if (el) { scrollRef.current = el; el.addEventListener('scroll', checkScroll); } }}
+                ref={scrollRef}
+                onScroll={checkScroll}
             >
                 {/* Header Section */}
                 <div className={`bg-[#2663EB] p-5 sm:p-6 relative overflow-hidden z-10 text-white shadow-xl shadow-blue-500/20 ${isEmbedded ? 'mx-4 mt-4 mb-5 rounded-[28px]' : 'mt-3 sm:mt-4 mb-5 rounded-3xl'}`}>
@@ -492,29 +505,35 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                     </div>
                 )}
 
-                {successMode ? (
-                    <div className="flex flex-col items-center justify-center py-10 text-center animate-in zoom-in duration-300">
-                        <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-6">
-                            <Check size={40} className="text-green-600 dark:text-green-400" strokeWidth={3} />
-                        </div>
-                        <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Zahlung erfolgreich!</h3>
-                        <p className="text-slate-500 dark:text-slate-400">Dein Premium-Zugang wird aktiviert...</p>
-                    </div>
-                ) : clientSecret ? (
+                {clientSecret ? (
                     <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl shadow-sm dark:shadow-black/20 border border-transparent dark:border-slate-800">
-                        <button
-                            onClick={() => { setClientSecret(null); setLoading(false); }}
-                            className="mb-4 text-sm text-slate-500 dark:text-slate-300 flex items-center gap-1"
-                        >
-                            ← Zurück
-                        </button>
-                        <EmbeddedPayment
-                            clientSecret={clientSecret}
-                            onComplete={handlePaymentComplete}
-                            trackingContext={isTikTokPaywall ? getTikTokPaywallContext({
-                                checkout_mode: user ? 'authenticated' : 'guest',
-                            }) : undefined}
-                        />
+                        {successMode ? (
+                            <div className="flex flex-col items-center justify-center py-10 text-center animate-in zoom-in duration-300">
+                                <div className="w-20 h-20 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mb-6">
+                                    <Check size={40} className="text-green-600 dark:text-green-400" strokeWidth={3} />
+                                </div>
+                                <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Zahlung erfolgreich!</h3>
+                                <p className="text-slate-500 dark:text-slate-400">
+                                    {user ? 'Dein Premium-Zugang wird aktiviert...' : 'Du wirst gleich weitergeleitet...'}
+                                </p>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => { setClientSecret(null); setLoading(false); }}
+                                className="mb-4 text-sm text-slate-500 dark:text-slate-300 flex items-center gap-1"
+                            >
+                                ← Zurück
+                            </button>
+                        )}
+                        <div className={successMode ? 'h-0 overflow-hidden opacity-0 pointer-events-none' : ''}>
+                            <EmbeddedPayment
+                                clientSecret={clientSecret}
+                                onComplete={handlePaymentComplete}
+                                trackingContext={isTikTokPaywall ? getTikTokPaywallContext({
+                                    checkout_mode: user ? 'authenticated' : 'guest',
+                                }) : undefined}
+                            />
+                        </div>
                     </div>
                 ) : (
                     <div className={`md:grid md:grid-cols-2 md:gap-x-12 md:gap-y-6 md:items-start max-w-full ${isEmbedded ? 'px-4 sm:px-6 pt-4 pb-6' : ''}`}>
