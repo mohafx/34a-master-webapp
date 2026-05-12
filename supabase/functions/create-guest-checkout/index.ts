@@ -71,7 +71,7 @@ serve(async (req) => {
 
     try {
         // Parse body — no auth header required for guest checkout
-        const { email, priceId, tiktokPlanPayload } = await req.json();
+        const { email, priceId, tiktokPlanPayload, analyticsContext } = await req.json();
 
         // --- Validate input ---
         if (!email || typeof email !== "string" || !email.includes("@")) {
@@ -90,7 +90,7 @@ serve(async (req) => {
 
         // --- Map price ID ---
         const PRICE_MAPPING: Record<string, string> = {
-            "6months": Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1SgXd94CFd3pD2h0Nah9Fnkz",
+            "6months": Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1TWCSo4CFd3pD2h0xAdNn66L",
         };
 
         const stripePriceId = PRICE_MAPPING[priceId];
@@ -150,6 +150,12 @@ serve(async (req) => {
             guest_checkout: "true",
             guest_email: email,
         };
+        if (analyticsContext?.session_funnel_id) {
+            metadata.session_funnel_id = String(analyticsContext.session_funnel_id).slice(0, 500);
+        }
+        if (analyticsContext?.funnel) {
+            metadata.funnel = String(analyticsContext.funnel).slice(0, 100);
+        }
         if (tiktokLernplanId) {
             metadata.tiktok_lernplan_id = tiktokLernplanId;
         }
@@ -181,6 +187,8 @@ serve(async (req) => {
             email,
             has_tiktok_plan: Boolean(tiktokLernplanId),
             guest_checkout: true,
+            session_funnel_id: metadata.session_funnel_id,
+            funnel: metadata.funnel,
             source: "create_guest_checkout",
         });
         if (tiktokLernplanId) {

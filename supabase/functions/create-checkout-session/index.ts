@@ -90,7 +90,7 @@ serve(async (req) => {
         }
 
         // 2. Parse request body
-        const { priceId, tiktokPlanPayload } = await req.json();
+        const { priceId, tiktokPlanPayload, analyticsContext } = await req.json();
 
         if (!priceId) {
             throw new Error("Price ID fehlt");
@@ -98,7 +98,7 @@ serve(async (req) => {
 
         // MAP internal price IDs to Stripe Price IDs
         const PRICE_MAPPING = {
-            '6months': Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1SgXd94CFd3pD2h0Nah9Fnkz",
+            '6months': Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1TWCSo4CFd3pD2h0xAdNn66L",
         };
 
         const stripePriceId = PRICE_MAPPING[priceId as keyof typeof PRICE_MAPPING];
@@ -120,6 +120,12 @@ serve(async (req) => {
             user_id: user.id,
             plan_type: priceId,
         };
+        if (analyticsContext?.session_funnel_id) {
+            metadata.session_funnel_id = String(analyticsContext.session_funnel_id).slice(0, 500);
+        }
+        if (analyticsContext?.funnel) {
+            metadata.funnel = String(analyticsContext.funnel).slice(0, 100);
+        }
         if (tiktokLernplanId) {
             metadata.tiktok_lernplan_id = tiktokLernplanId;
         }
@@ -155,6 +161,8 @@ serve(async (req) => {
             checkout_mode: "authenticated",
             email: user.email,
             has_tiktok_plan: Boolean(tiktokLernplanId),
+            session_funnel_id: metadata.session_funnel_id,
+            funnel: metadata.funnel,
             source: "create_checkout_session",
         });
         if (tiktokLernplanId) {

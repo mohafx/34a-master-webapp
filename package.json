@@ -22,6 +22,8 @@
     "transition:dry-run": "node scripts/transition-access.mjs dry-run",
     "transition:apply": "node scripts/transition-access.mjs apply",
     "transition:status": "node scripts/transition-access.mjs status",
+    "analytics:backfill-stripe:dry-run": "node scripts/backfill-stripe-posthog.mjs",
+    "analytics:backfill-stripe:apply": "node scripts/backfill-stripe-posthog.mjs --apply",
     "test:transition-access": "vitest run tests/transitionAccess.test.ts",
     "test:question-pipeline": "vitest run tests/question-explanation-pipeline.validation.test.ts",
     "test:written-regen-pipeline": "vitest run tests/written-exam-regeneration.validation.test.ts",

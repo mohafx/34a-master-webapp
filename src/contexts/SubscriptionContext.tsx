@@ -27,6 +27,7 @@ type PremiumSource = 'stripe' | 'transition' | 'dev' | 'test' | null;
 
 interface CheckoutOptions {
   tiktokPlanPayload?: unknown;
+  analyticsContext?: Record<string, unknown>;
 }
 
 interface SubscriptionContextType {
@@ -334,6 +335,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         body: {
           priceId: plan,
           tiktokPlanPayload: options.tiktokPlanPayload,
+          analyticsContext: options.analyticsContext,
         }
       });
 
@@ -356,7 +358,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         throw new Error('No client secret returned from server');
       }
 
-      trackEvent('checkout_started', { plan: plan, price: 49, has_tiktok_plan: Boolean(options.tiktokPlanPayload) });
+      trackEvent('checkout_started', { plan: plan, price: 9, has_tiktok_plan: Boolean(options.tiktokPlanPayload) });
 
       console.log('Got clientSecret, length:', data.clientSecret?.length);
       return data.clientSecret;
@@ -407,7 +409,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         // Track subscription activated
         trackEvent('subscription_activated', {
           plan: details?.plan,
-          price: 49,
+          price: 9,
           source: 'checkout'
         });
 

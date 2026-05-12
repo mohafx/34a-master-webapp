@@ -9,7 +9,46 @@ import { FULL_EXAM_PASSING_POINTS, FULL_EXAM_TOTAL_POINTS, WrittenExamQuestion, 
 import { Clock, ChevronLeft, ChevronRight, CheckCircle, AlertTriangle, Save, Info, ArrowLeft, Settings, Bookmark } from 'lucide-react';
 import { QuizSettingsDialog } from './QuizSettingsDialog';
 
+const ACTIVE_FULL_EXAM_SESSION_KEY = 'active_written_exam_session_id';
+const SESSION_STORAGE_PREFIX = 'written_exam_session_';
+const SESSION_SNAPSHOT_PREFIX = 'written_exam_session_snapshot_';
 
+function getRemainingSeconds(session: WrittenExamSession): number {
+  const startTime = new Date(session.startedAt).getTime();
+  const limitSeconds = (session.timeLimitMinutes || 120) * 60;
+  const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+  return Math.max(0, limitSeconds - elapsedSeconds);
+}
+
+function readStoredSession(sessionId: string | null): WrittenExamSession | null {
+  if (!sessionId) return null;
+
+  try {
+    const data = localStorage.getItem(`${SESSION_STORAGE_PREFIX}${sessionId}`);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    console.error('Error reading stored written exam session:', error);
+    return null;
+  }
+}
+
+function writeStoredSession(session: WrittenExamSession) {
+  localStorage.setItem(`${SESSION_STORAGE_PREFIX}${session.id}`, JSON.stringify(session));
+}
+
+function readAnswerSnapshot(sessionId: string): Record<string, string> | null {
+  try {
+    const data = localStorage.getItem(`${SESSION_SNAPSHOT_PREFIX}${sessionId}`);
+    if (!data) return null;
+    const parsed = JSON.parse(data);
+    return parsed?.userAnswers && typeof parsed.userAnswers === 'object'
+      ? parsed.userAnswers
+      : null;
+  } catch (error) {
+    console.error('Error reading written exam answer snapshot:', error);
+    return null;
+  }
+}
 
 export default function WrittenExam() {
   const navigate = useNavigate();
@@ -57,7 +96,6 @@ export default function WrittenExam() {
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
   const [showLeaveWarning, setShowLeaveWarning] = useState(false);
   const [showQuizSettings, setShowQuizSettings] = useState(false);
-  const [examStartTime] = useState(Date.now());
   const [showQuestionGrid, setShowQuestionGrid] = useState(false);
   const [markedQuestions, setMarkedQuestions] = useState<string[]>([]);
 
@@ -82,58 +120,153 @@ export default function WrittenExam() {
 
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionRef = useRef<WrittenExamSession | null>(null);
+  const answersRef = useRef<Record<string, string>>({});
+  const initializeKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
+  useEffect(() => {
+    answersRef.current = userAnswers;
+  }, [userAnswers]);
+
+  const persistLocalExamState = useCallback((targetSession: WrittenExamSession | null, answers: Record<string, string>) => {
+    if (!targetSession || targetSession.completedAt) return;
+
+    localStorage.setItem(`${SESSION_SNAPSHOT_PREFIX}${targetSession.id}`, JSON.stringify({
+      userAnswers: answers,
+      updatedAt: new Date().toISOString()
+    }));
+
+    if (targetSession.userId === 'guest') {
+      writeStoredSession({ ...targetSession, userAnswers: answers });
+      localStorage.setItem(ACTIVE_FULL_EXAM_SESSION_KEY, targetSession.id);
+    }
+  }, []);
+
+  const getBestAvailableAnswers = useCallback((targetSession: WrittenExamSession): Record<string, string> => {
+    const storedAnswers = targetSession.userAnswers || {};
+    const snapshotAnswers = readAnswerSnapshot(targetSession.id);
+
+    if (snapshotAnswers && Object.keys(snapshotAnswers).length > Object.keys(storedAnswers).length) {
+      return snapshotAnswers;
+    }
+
+    return storedAnswers;
+  }, []);
+
+  const completeSession = useCallback(async (
+    targetSession: WrittenExamSession,
+    targetQuestions: WrittenExamQuestion[],
+    answers: Record<string, string>
+  ) => {
+    const score = calculateExamPoints(targetQuestions, answers);
+
+    trackEvent('written_exam_completed', {
+      total_questions: targetQuestions.length,
+      answered_count: Object.keys(answers).length,
+      score_points: score,
+      score_percent: Math.round((score / FULL_EXAM_TOTAL_POINTS) * 100),
+      passed: score >= FULL_EXAM_PASSING_POINTS,
+      duration_seconds: Math.round((Date.now() - new Date(targetSession.startedAt).getTime()) / 1000),
+    });
+
+    if (authUser) {
+      await db.completeWrittenExamSession(targetSession.id, score, answers);
+    } else {
+      const completedSession = {
+        ...targetSession,
+        completedAt: new Date().toISOString(),
+        score,
+        userAnswers: answers
+      };
+      writeStoredSession(completedSession);
+    }
+
+    if (localStorage.getItem(ACTIVE_FULL_EXAM_SESSION_KEY) === targetSession.id) {
+      localStorage.removeItem(ACTIVE_FULL_EXAM_SESSION_KEY);
+    }
+    localStorage.removeItem(`${SESSION_SNAPSHOT_PREFIX}${targetSession.id}`);
+
+    navigate(`/written-exam/results/${targetSession.id}`);
+  }, [authUser, navigate, trackEvent]);
 
   // Initialize exam session
   useEffect(() => {
+    const initializeKey = authUser?.id || 'guest';
+    if (initializeKeyRef.current === initializeKey) return;
+    initializeKeyRef.current = initializeKey;
+
     async function initializeExam() {
       try {
         setLoading(true);
 
-        // Generate 82 random questions
-        const questionIds = await generateExamQuestions();
-
-        // Create session (for logged in users) or use localStorage (for guests)
         let newSession: WrittenExamSession;
+        let isResumedSession = false;
 
         if (authUser) {
-          // Logged in: create session in database
-          newSession = await db.createWrittenExamSession(authUser.id, questionIds);
+          const activeSession = await db.getActiveWrittenExamSession(authUser.id, 'full');
+          if (activeSession) {
+            newSession = activeSession;
+            isResumedSession = true;
+          } else {
+            const questionIds = await generateExamQuestions(authUser.id);
+            newSession = await db.createWrittenExamSession(authUser.id, questionIds);
+          }
         } else {
-          // Guest: create session in localStorage
-          const guestSessionId = `guest_${Date.now()}`;
-          newSession = {
-            id: guestSessionId,
-            userId: 'guest',
-            questionIds: questionIds,
-            userAnswers: {},
-            startedAt: new Date().toISOString(),
-            timeLimitMinutes: 120,
-            totalQuestions: 82
-          };
+          const activeGuestSession = readStoredSession(localStorage.getItem(ACTIVE_FULL_EXAM_SESSION_KEY));
+          if (activeGuestSession && !activeGuestSession.completedAt && activeGuestSession.totalQuestions === 82) {
+            newSession = activeGuestSession;
+            isResumedSession = true;
+          } else {
+            const questionIds = await generateExamQuestions();
+            const guestSessionId = `guest_${Date.now()}`;
+            newSession = {
+              id: guestSessionId,
+              userId: 'guest',
+              questionIds,
+              userAnswers: {},
+              startedAt: new Date().toISOString(),
+              timeLimitMinutes: 120,
+              totalQuestions: 82,
+              examType: 'full'
+            };
 
-          // Save to localStorage
-          localStorage.setItem(`written_exam_session_${guestSessionId}`, JSON.stringify(newSession));
+            writeStoredSession(newSession);
+            localStorage.setItem(ACTIVE_FULL_EXAM_SESSION_KEY, guestSessionId);
+          }
         }
 
-        setSession(newSession);
+        const answers = getBestAvailableAnswers(newSession);
+        const sessionWithBestAnswers = { ...newSession, userAnswers: answers };
+        setSession(sessionWithBestAnswers);
+        setUserAnswers(answers);
 
         // Load questions
-        const loadedQuestions = await db.getWrittenExamQuestionsByIds(questionIds);
+        const loadedQuestions = await db.getWrittenExamQuestionsByIds(sessionWithBestAnswers.questionIds);
         setQuestions(loadedQuestions as WrittenExamQuestion[]);
 
-        // Initialize timer from session start time
-        const startTime = new Date(newSession.startedAt).getTime();
-        const now = Date.now();
-        const elapsedSeconds = Math.floor((now - startTime) / 1000);
-        const remaining = Math.max(0, 120 * 60 - elapsedSeconds);
+        if (authUser && answers !== newSession.userAnswers && Object.keys(answers).length > 0) {
+          await db.updateWrittenExamSession(newSession.id, answers);
+        }
+
+        const remaining = getRemainingSeconds(sessionWithBestAnswers);
         setTimeRemaining(remaining);
 
-        // Track written exam started
-        trackEvent('written_exam_started', {
-          question_count: loadedQuestions.length
-        });
-
         setLoading(false);
+
+        if (remaining <= 0) {
+          await completeSession(sessionWithBestAnswers, loadedQuestions as WrittenExamQuestion[], answers);
+          return;
+        }
+
+        if (!isResumedSession) {
+          trackEvent('written_exam_started', {
+            question_count: loadedQuestions.length
+          });
+        }
       } catch (error: any) {
         console.error('Error initializing exam:', error);
         const errorMessage = error?.message || 'Unbekannter Fehler beim Starten der Prüfung';
@@ -144,48 +277,21 @@ export default function WrittenExam() {
     }
 
     initializeExam();
-  }, [authUser, navigate]);
+  }, [authUser, navigate, trackEvent, getBestAvailableAnswers, completeSession]);
 
   // Handle complete exam
   const handleCompleteExam = useCallback(async () => {
     if (!session || !questions.length) return;
 
     try {
-      // Calculate score
-      const score = calculateExamPoints(questions, userAnswers);
-
-      // Track exam completion
-      trackEvent('written_exam_completed', {
-        total_questions: questions.length,
-        answered_count: Object.keys(userAnswers).length,
-        score_points: score,
-        score_percent: Math.round((score / FULL_EXAM_TOTAL_POINTS) * 100),
-        passed: score >= FULL_EXAM_PASSING_POINTS,
-        duration_seconds: Math.round((Date.now() - examStartTime) / 1000),
-      });
-
-      // Complete session
-      if (authUser) {
-        // Logged in: save to database
-        await db.completeWrittenExamSession(session.id, score);
-      } else {
-        // Guest: save to localStorage
-        const completedSession = {
-          ...session,
-          completedAt: new Date().toISOString(),
-          score: score,
-          userAnswers: userAnswers
-        };
-        localStorage.setItem(`written_exam_session_${session.id}`, JSON.stringify(completedSession));
-      }
-
-      // Navigate to results
-      navigate(`/written-exam/results/${session.id}`);
+      const finalAnswers = answersRef.current;
+      persistLocalExamState(session, finalAnswers);
+      await completeSession(session, questions, finalAnswers);
     } catch (error) {
       console.error('Error completing exam:', error);
       alert('Fehler beim Abschließen der Prüfung. Bitte versuchen Sie es erneut.');
     }
-  }, [session, questions, userAnswers, navigate, authUser]);
+  }, [session, questions, persistLocalExamState, completeSession]);
 
 
 
@@ -220,6 +326,7 @@ export default function WrittenExam() {
   const saveAnswers = useCallback(async (answers: Record<string, string>) => {
     if (!session) return;
 
+    persistLocalExamState(session, answers);
     setIsSaving(true);
     try {
       if (authUser) {
@@ -236,7 +343,7 @@ export default function WrittenExam() {
     } finally {
       setIsSaving(false);
     }
-  }, [session, authUser]);
+  }, [session, authUser, persistLocalExamState]);
 
   // Debounced save
   useEffect(() => {
@@ -261,6 +368,7 @@ export default function WrittenExam() {
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (session && !session.completedAt) {
+        persistLocalExamState(sessionRef.current, answersRef.current);
         e.preventDefault();
         e.returnValue = '';
         setShowLeaveWarning(true);
@@ -269,7 +377,18 @@ export default function WrittenExam() {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [session]);
+  }, [session, persistLocalExamState]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        persistLocalExamState(sessionRef.current, answersRef.current);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [persistLocalExamState]);
 
   const handleAnswerSelect = (answerKey: string) => {
     if (!questions[currentIndex]) return;
@@ -296,16 +415,24 @@ export default function WrittenExam() {
         // If already 2 selected, don't add more
       }
 
-      setUserAnswers(prev => ({
-        ...prev,
-        [question.id]: answers.sort().join(',')
-      }));
+      setUserAnswers(prev => {
+        const nextAnswers = {
+          ...prev,
+          [question.id]: answers.sort().join(',')
+        };
+        persistLocalExamState(sessionRef.current, nextAnswers);
+        return nextAnswers;
+      });
     } else {
       // Single choice - replace answer
-      setUserAnswers(prev => ({
-        ...prev,
-        [question.id]: answerKey
-      }));
+      setUserAnswers(prev => {
+        const nextAnswers = {
+          ...prev,
+          [question.id]: answerKey
+        };
+        persistLocalExamState(sessionRef.current, nextAnswers);
+        return nextAnswers;
+      });
     }
   };
 

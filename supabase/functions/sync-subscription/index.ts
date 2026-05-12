@@ -186,7 +186,7 @@ serve(async (req) => {
 
                 // Check logic for 6-months validity
                 // We assume 6 months duration for one-time payments
-                if (session.metadata?.plan_type === '6months' || session.amount_total === 4900) { // Check amount as fallback (49 EUR)
+                if (session.metadata?.plan_type === '6months' || session.amount_total === 900) { // Check amount as fallback (9 EUR)
 
                     const created = new Date(session.created * 1000);
                     const expiresAt = new Date(created);

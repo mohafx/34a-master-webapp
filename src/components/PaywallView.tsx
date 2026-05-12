@@ -362,7 +362,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
 
         trackEvent('upgrade_clicked', {
             plan: selectedPlan,
-            price: 49,
+            price: 9,
             source: isEmbedded ? 'onboarding' : 'paywall_dialog'
         });
         if (isTikTokPaywall) {
@@ -646,8 +646,8 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                     <div className="p-5 flex items-center justify-between dark:bg-slate-900">
                                         <div className="flex flex-col gap-2">
                                             <div className="flex items-baseline gap-2">
-                                                <span className="font-black text-[18px] dark:text-white">€49</span>
-                                                <span className="font-bold text-[10px] text-slate-400 dark:text-slate-400">statt <span className="line-through">€99</span></span>
+                                                <span className="font-black text-[18px] dark:text-white">€9</span>
+                                                <span className="font-bold text-[10px] text-slate-400 dark:text-slate-400">statt <span className="line-through">€49</span></span>
                                             </div>
                                             <p className="font-black text-[10px] uppercase tracking-tight dark:text-slate-200">Einmalzahlung für 6 Monate</p>
                                         </div>

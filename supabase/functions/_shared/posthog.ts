@@ -4,6 +4,8 @@ export interface CapturePostHogOptions {
   distinctId?: string | null;
   properties?: PostHogProperties;
   set?: PostHogProperties;
+  setOnce?: PostHogProperties;
+  timestamp?: string;
 }
 
 const DEFAULT_POSTHOG_HOST = "https://eu.i.posthog.com";
@@ -31,11 +33,15 @@ export async function capturePostHogEvent(
   const properties: PostHogProperties = {
     ...options.properties,
     source_type: "server",
-    timestamp: new Date().toISOString(),
+    timestamp: options.timestamp || new Date().toISOString(),
   };
 
   if (options.set && Object.keys(options.set).length > 0) {
     properties.$set = options.set;
+  }
+
+  if (options.setOnce && Object.keys(options.setOnce).length > 0) {
+    properties.$set_once = options.setOnce;
   }
 
   try {
@@ -46,6 +52,7 @@ export async function capturePostHogEvent(
         api_key: apiKey,
         event,
         distinct_id: options.distinctId || "server",
+        timestamp: options.timestamp,
         properties,
       }),
     });
@@ -57,4 +64,20 @@ export async function capturePostHogEvent(
   } catch (error) {
     console.error(`[posthog] Failed to capture ${event}:`, error);
   }
+}
+
+export async function identifyPostHogUser(
+  userId: string | null | undefined,
+  anonymousDistinctId: string | null | undefined,
+  properties: PostHogProperties = {},
+): Promise<void> {
+  if (!userId || !anonymousDistinctId || userId === anonymousDistinctId) return;
+
+  await capturePostHogEvent("$identify", {
+    distinctId: userId,
+    properties: {
+      $anon_distinct_id: anonymousDistinctId,
+      ...properties,
+    },
+  });
 }

@@ -61,6 +61,7 @@ const MiniExam = lazy(() => import('./components/pages/MiniExam'));
 const MiniExamIntro = lazy(() => import('./components/pages/MiniExamIntro'));
 const ExamSelection = lazy(() => import('./components/pages/ExamSelection'));
 const WrittenExamResults = lazy(() => import('./components/pages/WrittenExamResults'));
+const WrittenExamHistory = lazy(() => import('./components/pages/WrittenExamHistory'));
 const LessonView = lazy(() => import('./components/pages/LessonView'));
 const LessonQuiz = lazy(() => import('./components/pages/LessonQuiz'));
 const FlashcardSelection = lazy(() => import('./components/pages/FlashcardSelection'));
@@ -847,6 +848,7 @@ function AppContent() {
                     <Route path="/mini-exam" element={<MiniExam />} />
                     <Route path="/written-exam" element={<WrittenExam />} />
                     <Route path="/written-exam/results/:sessionId" element={<WrittenExamResults />} />
+                    <Route path="/exam/history" element={<WrittenExamHistory />} />
                     <Route path="/statistics" element={<Statistics />} />
                     <Route path="/lernplan" element={<Navigate to="/" replace />} />
 
@@ -906,7 +908,7 @@ function AppContent() {
             {/* Cookie Consent Banner */}
             <TransitionAccessNotice variant="controller" />
             <CookieConsent />
-            {/* <LocalDevPanel /> */}
+            <LocalDevPanel />
           </div>
         </HashRouter>
       </AppContext.Provider>

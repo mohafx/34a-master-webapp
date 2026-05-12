@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { capturePostHog } from "../_shared/posthog.ts";
+import { capturePostHog, capturePostHogEvent, identifyPostHogUser } from "../_shared/posthog.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
     apiVersion: "2024-06-20",
@@ -85,27 +85,61 @@ serve(async (req) => {
             session.payment_status === 'paid';
 
         if (isSuccess) {
-            await capturePostHog("payment_succeeded_server", session.client_reference_id || session.metadata?.user_id, {
-                tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
-                checkout_session_id: session.id,
-                payment_status: session.payment_status,
-                plan: session.metadata?.plan_type,
-                checkout_mode: session.metadata?.guest_checkout === "true" ? "guest" : "authenticated",
-                email: session.customer_email,
+            const userId = session.client_reference_id || session.metadata?.user_id;
+            const checkoutMode = session.metadata?.guest_checkout === "true" ? "guest" : "authenticated";
+            const paidAt = new Date((session.created || Math.floor(Date.now() / 1000)) * 1000).toISOString();
+
+            await identifyPostHogUser(userId, session.metadata?.session_funnel_id, {
                 source: "verify_checkout",
-            });
-            await capturePostHog("tiktok_payment_succeeded_server", session.client_reference_id || session.metadata?.user_id, {
-                funnel: "tiktok_pruefungscheck",
-                funnel_version: "2026-04-29",
-                source: "verify_checkout",
-                tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
                 checkout_session_id: session.id,
-                payment_status: session.payment_status,
-                plan_status: "payment_succeeded",
             });
+            await capturePostHogEvent("payment_succeeded_server", {
+                distinctId: userId,
+                timestamp: paidAt,
+                properties: {
+                    tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+                    checkout_session_id: session.id,
+                    payment_status: session.payment_status,
+                    plan: session.metadata?.plan_type,
+                    checkout_mode: checkoutMode,
+                    email: session.customer_email || session.metadata?.guest_email,
+                    source: "verify_checkout",
+                    session_funnel_id: session.metadata?.session_funnel_id,
+                    funnel: session.metadata?.funnel,
+                    stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id,
+                    amount_total: session.amount_total,
+                    currency: session.currency,
+                },
+                set: {
+                    email: session.customer_email || session.metadata?.guest_email || null,
+                    is_premium: true,
+                    premium_source: "stripe",
+                    premium_plan: session.metadata?.plan_type,
+                    last_payment_at: paidAt,
+                    stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id,
+                },
+                setOnce: {
+                    first_payment_at: paidAt,
+                    first_paid_plan: session.metadata?.plan_type,
+                    first_checkout_mode: checkoutMode,
+                },
+            });
+            if (session.metadata?.tiktok_lernplan_id || session.metadata?.funnel === "tiktok_pruefungscheck") {
+                await capturePostHog("tiktok_payment_succeeded_server", userId, {
+                    funnel: "tiktok_pruefungscheck",
+                    funnel_version: "2026-04-29",
+                    source: "verify_checkout",
+                    tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+                    checkout_session_id: session.id,
+                    payment_status: session.payment_status,
+                    plan_status: "payment_succeeded",
+                    session_funnel_id: session.metadata?.session_funnel_id,
+                    checkout_mode: checkoutMode,
+                });
+            }
             await activateTikTokLernplan(
                 session.metadata?.tiktok_lernplan_id,
-                session.client_reference_id || session.metadata?.user_id,
+                userId,
             );
         } else {
             await capturePostHog("payment_failed_server", session.client_reference_id || session.metadata?.user_id, {

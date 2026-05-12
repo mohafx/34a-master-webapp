@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../App';
 import { useAuth } from '../../contexts/AuthContext';
-import { User, LogOut, Moon, Sun, Bell, Trash2, Info, Sparkles, Crown, Languages, Bookmark, BarChart3, ArrowLeft, Shield, Eye } from 'lucide-react';
+import { User, LogOut, Moon, Sun, Bell, Trash2, Info, Sparkles, Crown, Languages, Bookmark, BarChart3, ArrowLeft, Shield, Eye, FileText } from 'lucide-react';
 import { AuthDialog } from '../auth/AuthDialog';
 import { useSubscription } from '../../contexts/SubscriptionContext';
 import { TransitionAccessNotice } from '../TransitionAccessNotice';
@@ -53,12 +53,18 @@ export default function Profile() {
           'guest_answered_order',
           'examDate',
           '34a_lernplan',
-          'answered_order'
+          'answered_order',
+          'active_written_exam_session_id'
         ];
 
         // Also clear any expanded sections
         Object.keys(localStorage).forEach(key => {
-          if (key.startsWith('user_expanded_sections_') || key.startsWith('guest_expanded_sections_')) {
+          if (
+            key.startsWith('user_expanded_sections_') ||
+            key.startsWith('guest_expanded_sections_') ||
+            key.startsWith('written_exam_session_') ||
+            key.startsWith('written_exam_session_snapshot_')
+          ) {
             keysToRemove.push(key);
           }
         });
@@ -327,6 +333,23 @@ export default function Profile() {
         <div>
           <span className="text-sm font-bold text-slate-900 dark:text-white block mb-0.5">Statistiken</span>
           {language === 'DE_AR' && <p className="text-xs text-slate-500 dark:text-slate-400" dir="rtl">الإحصائيات</p>}
+        </div>
+      </div>
+      <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400 dark:text-slate-500">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </div>
+    </div>
+
+    <div className="p-5 flex justify-between items-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" onClick={() => navigate('/exam/history')}>
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center">
+          <FileText size={20} className="text-slate-600 dark:text-slate-400" />
+        </div>
+        <div>
+          <span className="text-sm font-bold text-slate-900 dark:text-white block mb-0.5">Prüfungsverlauf</span>
+          {language === 'DE_AR' && <p className="text-xs text-slate-500 dark:text-slate-400" dir="rtl">سجل الامتحانات</p>}
         </div>
       </div>
       <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400 dark:text-slate-500">

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GraduationCap, ArrowLeft, Languages, Timer, Zap } from 'lucide-react';
+import { GraduationCap, ArrowLeft, Languages, Zap, FileText } from 'lucide-react';
 import { useApp } from '../../App';
 
 export default function ExamSelection() {
@@ -117,6 +117,19 @@ export default function ExamSelection() {
                     </div>
                 </button>
             </div>
+
+            <button
+                onClick={() => navigate('/exam/history')}
+                className="mt-4 w-full text-left bg-white dark:bg-slate-800 rounded-[24px] p-5 shadow-sm border border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-all active:scale-[0.99] flex items-center gap-4"
+            >
+                <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center">
+                    <FileText size={24} className="text-slate-600 dark:text-slate-300" strokeWidth={2.5} />
+                </div>
+                <div className="flex-1">
+                    <h3 className="font-black text-base text-slate-900 dark:text-white mb-0.5">Abgeschlossene Prüfungen</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Prüfungen ansehen und Antworten prüfen.</p>
+                </div>
+            </button>
         </div>
     );
 }

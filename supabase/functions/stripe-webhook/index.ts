@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { capturePostHog } from "../_shared/posthog.ts";
+import { capturePostHog, capturePostHogEvent, identifyPostHogUser } from "../_shared/posthog.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
     apiVersion: "2024-06-20",
@@ -124,6 +124,78 @@ async function findUserIdForInvoice(invoice: Stripe.Invoice): Promise<string | n
     return customerSub?.user_id || null;
 }
 
+function getCheckoutMode(session: Stripe.Checkout.Session): "guest" | "authenticated" {
+    return session.metadata?.guest_checkout === "true" ? "guest" : "authenticated";
+}
+
+async function capturePaymentSucceeded(
+    session: Stripe.Checkout.Session,
+    userId: string,
+    source = "stripe_webhook",
+) {
+    const planType = session.metadata?.plan_type || "monthly";
+    const checkoutMode = getCheckoutMode(session);
+    const paidAt = new Date((session.created || Math.floor(Date.now() / 1000)) * 1000).toISOString();
+    const sessionFunnelId = session.metadata?.session_funnel_id;
+
+    await identifyPostHogUser(userId, sessionFunnelId, {
+        source,
+        checkout_session_id: session.id,
+        funnel: session.metadata?.funnel,
+    });
+
+    await capturePostHogEvent("payment_succeeded_server", {
+        distinctId: userId,
+        timestamp: paidAt,
+        properties: {
+            checkout_session_id: session.id,
+            payment_status: session.payment_status,
+            plan: planType,
+            checkout_mode: checkoutMode,
+            email: session.customer_email || session.metadata?.guest_email,
+            source,
+            tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+            session_funnel_id: sessionFunnelId,
+            funnel: session.metadata?.funnel,
+            stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id,
+            stripe_payment_intent_id: typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id,
+            amount_total: session.amount_total,
+            currency: session.currency,
+        },
+        set: {
+            email: session.customer_email || session.metadata?.guest_email || null,
+            is_premium: true,
+            premium_source: "stripe",
+            premium_plan: planType,
+            last_payment_at: paidAt,
+            stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id,
+        },
+        setOnce: {
+            first_payment_at: paidAt,
+            first_paid_plan: planType,
+            first_checkout_mode: checkoutMode,
+        },
+    });
+
+    if (session.metadata?.tiktok_lernplan_id || session.metadata?.funnel === "tiktok_pruefungscheck") {
+        await capturePostHogEvent("tiktok_payment_succeeded_server", {
+            distinctId: userId,
+            timestamp: paidAt,
+            properties: {
+                funnel: "tiktok_pruefungscheck",
+                funnel_version: "2026-04-29",
+                source,
+                tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
+                checkout_session_id: session.id,
+                payment_status: session.payment_status,
+                plan_status: "payment_succeeded",
+                session_funnel_id: sessionFunnelId,
+                checkout_mode: checkoutMode,
+            },
+        });
+    }
+}
+
 // =====================================================
 // MAIN WEBHOOK HANDLER
 // =====================================================
@@ -183,6 +255,8 @@ serve(async (req) => {
                     plan: session.metadata?.plan_type,
                     checkout_mode: session.metadata?.guest_checkout === "true" ? "guest" : "authenticated",
                     email: session.customer_email,
+                    session_funnel_id: session.metadata?.session_funnel_id,
+                    funnel: session.metadata?.funnel,
                     source: "stripe_webhook",
                     stripe_event_id: event.id,
                     stripe_event_type: event.type,
@@ -194,6 +268,7 @@ serve(async (req) => {
                     tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
                     checkout_session_id: session.id,
                     payment_status: session.payment_status,
+                    session_funnel_id: session.metadata?.session_funnel_id,
                     plan_status: "pending_payment",
                 });
                 // Don't activate - just log. User will need to retry.
@@ -284,15 +359,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     }
 
     console.log(`[webhook] handleCheckoutSessionCompleted: userId=${userId}, mode=${session.mode}, plan=${planType}`);
-    await capturePostHog("payment_succeeded_server", userId, {
-        checkout_session_id: session.id,
-        payment_status: session.payment_status,
-        plan: planType,
-        checkout_mode: session.metadata?.guest_checkout === "true" ? "guest" : "authenticated",
-        email: session.customer_email,
-        source: "stripe_webhook",
-        tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
-    });
+    await capturePaymentSucceeded(session, userId);
 
     // Handle subscription mode
     if (session.mode === 'subscription' && subscriptionId) {
@@ -324,18 +391,6 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
             currentPeriodEnd: expiresAt,
         });
         console.log(`[webhook] One-time payment recorded for user ${userId}`);
-        if (session.metadata?.tiktok_lernplan_id) {
-            await capturePostHog("tiktok_payment_succeeded_server", userId, {
-                funnel: "tiktok_pruefungscheck",
-                funnel_version: "2026-04-29",
-                source: "stripe_webhook",
-                tiktok_lernplan_id: session.metadata.tiktok_lernplan_id,
-                checkout_session_id: session.id,
-                payment_status: session.payment_status,
-                plan_status: "payment_succeeded",
-            });
-        }
-
         await activateTikTokLernplan(session.metadata?.tiktok_lernplan_id, userId);
 
         // Send recovery email for guest checkout users so they can set a password
