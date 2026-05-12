@@ -675,18 +675,8 @@ export const db = {
     },
 
     // ========== WRITTEN EXAM ==========
-    async getWrittenExamQuestionsByTopic(topic: string, limit: number) {
-        const { data, error } = await supabase
-            .from('written_exam_questions')
-            .select('*')
-            .eq('topic', topic)
-            .limit(limit);
-
-        if (error) throw error;
-
-        // Shuffle the results randomly
-        const shuffled = (data || []).sort(() => Math.random() - 0.5);
-        return shuffled.map((q: any) => ({
+    _mapWrittenExamQuestion(q: any) {
+        return {
             id: q.id,
             topic: q.topic,
             questionTextDE: q.question_text_de,
@@ -702,7 +692,94 @@ export const db = {
             correctAnswer: q.correct_answer,
             explanationDE: q.explanation_de,
             explanationAR: q.explanation_ar
-        }));
+        };
+    },
+
+    _mapPracticeQuestionToWrittenExamQuestion(q: any, topic: string) {
+        return {
+            id: q.id,
+            topic,
+            questionTextDE: q.text_de,
+            questionTextAR: q.text_ar,
+            answers: {
+                A: { de: q.answer_a_de, ar: q.answer_a_ar },
+                B: { de: q.answer_b_de, ar: q.answer_b_ar },
+                C: { de: q.answer_c_de, ar: q.answer_c_ar },
+                D: { de: q.answer_d_de, ar: q.answer_d_ar },
+                E: q.answer_e_de ? { de: q.answer_e_de, ar: q.answer_e_ar } : undefined,
+                F: q.answer_f_de ? { de: q.answer_f_de, ar: q.answer_f_ar } : undefined
+            },
+            correctAnswer: q.correct_answer,
+            explanationDE: q.explanation_de,
+            explanationAR: q.explanation_ar
+        };
+    },
+
+    _getWrittenExamTopicForPracticeModuleTitle(moduleTitle: string) {
+        const moduleTitleToTopic: Record<string, string> = {
+            Datenschutzrecht: 'Datenschutz',
+            'Bürgerliches Gesetzbuch (BGB)': 'BGB',
+            'Straf- und Strafverfahrensrecht': 'Strafrecht',
+            Unfallverhütungsvorschriften: 'DGUV'
+        };
+
+        return moduleTitleToTopic[moduleTitle] || moduleTitle;
+    },
+
+    _isEligiblePracticeWrittenExamQuestion(q: any) {
+        const correctAnswerCount = (q.correct_answer || '')
+            .split(',')
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+            .length;
+
+        return Boolean(
+            q.text_de &&
+            q.correct_answer &&
+            correctAnswerCount >= 1 &&
+            correctAnswerCount <= 2 &&
+            q.answer_a_de &&
+            q.answer_b_de &&
+            q.answer_c_de &&
+            q.answer_d_de
+        );
+    },
+
+    async getWrittenExamQuestionsByTopic(topic: string, limit: number) {
+        const { data, error } = await supabase
+            .from('written_exam_questions')
+            .select('*')
+            .eq('topic', topic)
+            .limit(limit);
+
+        if (error) throw error;
+
+        // Shuffle the results randomly
+        const shuffled = (data || []).sort(() => Math.random() - 0.5);
+        return shuffled.map((q: any) => this._mapWrittenExamQuestion(q));
+    },
+
+    async getPracticeQuestionsForWrittenExamTopic(topic: string, moduleTitle: string, limit: number) {
+        const { data: moduleData, error: moduleError } = await supabase
+            .from('modules')
+            .select('id')
+            .eq('title_de', moduleTitle)
+            .maybeSingle();
+
+        if (moduleError) throw moduleError;
+        if (!moduleData) return [];
+
+        const { data, error } = await supabase
+            .from('questions')
+            .select('*')
+            .eq('module_id', moduleData.id)
+            .limit(limit);
+
+        if (error) throw error;
+
+        return (data || [])
+            .filter((q: any) => this._isEligiblePracticeWrittenExamQuestion(q))
+            .map((q: any) => this._mapPracticeQuestionToWrittenExamQuestion(q, topic));
     },
 
     async getWrittenExamQuestion(questionId: string) {
@@ -716,53 +793,59 @@ export const db = {
 
         if (!data) return null;
 
-        return {
-            id: data.id,
-            topic: data.topic,
-            questionTextDE: data.question_text_de,
-            questionTextAR: data.question_text_ar,
-            answers: {
-                A: { de: data.answer_a_de, ar: data.answer_a_ar },
-                B: { de: data.answer_b_de, ar: data.answer_b_ar },
-                C: { de: data.answer_c_de, ar: data.answer_c_ar },
-                D: { de: data.answer_d_de, ar: data.answer_d_ar },
-                E: data.answer_e_de ? { de: data.answer_e_de, ar: data.answer_e_ar } : undefined,
-                F: data.answer_f_de ? { de: data.answer_f_de, ar: data.answer_f_ar } : undefined
-            },
-            correctAnswer: data.correct_answer,
-            explanationDE: data.explanation_de,
-            explanationAR: data.explanation_ar
-        };
+        return this._mapWrittenExamQuestion(data);
     },
 
     async getWrittenExamQuestionsByIds(questionIds: string[]) {
+        if (questionIds.length === 0) return [];
+
+        const writtenIds = questionIds.filter(id => !id.startsWith('question:'));
+        const practiceIds = questionIds
+            .filter(id => id.startsWith('question:'))
+            .map(id => id.replace(/^question:/, ''));
+
+        const [writtenResult, practiceResult] = await Promise.all([
+            writtenIds.length
+                ? supabase.from('written_exam_questions').select('*').in('id', writtenIds)
+                : Promise.resolve({ data: [], error: null }),
+            practiceIds.length
+                ? supabase.from('questions').select('*, modules!inner(title_de)').in('id', practiceIds)
+                : Promise.resolve({ data: [], error: null })
+        ]);
+
+        if (writtenResult.error) throw writtenResult.error;
+        if (practiceResult.error) throw practiceResult.error;
+
+        // Maintain order from questionIds array
+        const questionMapEntries: Array<[string, any]> = [
+            ...((writtenResult.data || []).map((q: any) => [q.id, this._mapWrittenExamQuestion(q)] as [string, any])),
+            ...((practiceResult.data || [])
+                .filter((q: any) => this._isEligiblePracticeWrittenExamQuestion(q))
+                .map((q: any) => [
+                    `question:${q.id}`,
+                    this._mapPracticeQuestionToWrittenExamQuestion(
+                        q,
+                        this._getWrittenExamTopicForPracticeModuleTitle(q.modules?.title_de || '')
+                    )
+                ] as [string, any]))
+        ];
+        const questionMap = new Map(questionMapEntries);
+
+        return questionIds.map(id => questionMap.get(id)).filter(Boolean);
+    },
+
+    async getRecentWrittenExamQuestionIds(userId: string, limit = 10) {
         const { data, error } = await supabase
-            .from('written_exam_questions')
-            .select('*')
-            .in('id', questionIds);
+            .from('written_exam_sessions')
+            .select('question_ids')
+            .eq('user_id', userId)
+            .eq('total_questions', 82)
+            .order('started_at', { ascending: false })
+            .limit(limit);
 
         if (error) throw error;
 
-        // Maintain order from questionIds array
-        const questionMap = new Map((data || []).map((q: any) => [q.id, {
-            id: q.id,
-            topic: q.topic,
-            questionTextDE: q.question_text_de,
-            questionTextAR: q.question_text_ar,
-            answers: {
-                A: { de: q.answer_a_de, ar: q.answer_a_ar },
-                B: { de: q.answer_b_de, ar: q.answer_b_ar },
-                C: { de: q.answer_c_de, ar: q.answer_c_ar },
-                D: { de: q.answer_d_de, ar: q.answer_d_ar },
-                E: q.answer_e_de ? { de: q.answer_e_de, ar: q.answer_e_ar } : undefined,
-                F: q.answer_f_de ? { de: q.answer_f_de, ar: q.answer_f_ar } : undefined
-            },
-            correctAnswer: q.correct_answer,
-            explanationDE: q.explanation_de,
-            explanationAR: q.explanation_ar
-        }]));
-
-        return questionIds.map(id => questionMap.get(id)).filter(Boolean);
+        return (data || []).flatMap((session: any) => session.question_ids || []);
     },
 
     async createWrittenExamSession(userId: string, questionIds: string[], examType: 'full' | 'mini' = 'full') {
@@ -793,7 +876,7 @@ export const db = {
             timeLimitMinutes: data.time_limit_minutes,
             score: data.score,
             totalQuestions: data.total_questions,
-            examType: data.total_questions === 16 ? 'mini' : 'full'
+            examType: (data.total_questions === 16 ? 'mini' : 'full') as 'mini' | 'full'
         };
     },
 
@@ -841,7 +924,7 @@ export const db = {
             timeLimitMinutes: data.time_limit_minutes,
             score: data.score,
             totalQuestions: data.total_questions,
-            examType: data.total_questions === 16 ? 'mini' : 'full'
+            examType: (data.total_questions === 16 ? 'mini' : 'full') as 'mini' | 'full'
         };
     },
 

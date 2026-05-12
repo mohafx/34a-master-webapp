@@ -7,16 +7,81 @@ import {
 } from '../types';
 import { getQuestionMaxPoints, scoreQuestionPoints } from '../utils/writtenExamAnswers';
 
+const RECENT_EXAM_HISTORY_LIMIT = 10;
+
+type ExamQuestionSource = 'written' | 'question';
+
+export type ExamQuestionCandidate = WrittenExamQuestion & {
+    source: ExamQuestionSource;
+};
+
+const WRITTEN_EXAM_TOPIC_TO_MODULE_TITLE: Record<string, string> = {
+    Datenschutz: 'Datenschutzrecht',
+    BGB: 'Bürgerliches Gesetzbuch (BGB)',
+    Strafrecht: 'Straf- und Strafverfahrensrecht',
+    DGUV: 'Unfallverhütungsvorschriften'
+};
+
+function getModuleTitleForExamTopic(topic: string): string {
+    return WRITTEN_EXAM_TOPIC_TO_MODULE_TITLE[topic] || topic;
+}
+
+function shuffle<T>(items: T[]): T[] {
+    const copy = [...items];
+    for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+}
+
+function normalizeQuestionHistoryId(questionId: string): string {
+    return questionId.startsWith('question:') ? questionId : `written:${questionId}`;
+}
+
+function getComparableQuestionId(question: ExamQuestionCandidate): string {
+    return question.source === 'question' ? `question:${question.id}` : `written:${question.id}`;
+}
+
+export function selectExamQuestionsByType(
+    candidates: ExamQuestionCandidate[],
+    requiredCount: number,
+    recentQuestionIds: Set<string>
+): ExamQuestionCandidate[] {
+    const randomized = shuffle(candidates);
+
+    const freshWritten = randomized.filter(q => q.source === 'written' && !recentQuestionIds.has(getComparableQuestionId(q)));
+    const freshPractice = randomized.filter(q => q.source === 'question' && !recentQuestionIds.has(getComparableQuestionId(q)));
+    const repeatedWritten = randomized.filter(q => q.source === 'written' && recentQuestionIds.has(getComparableQuestionId(q)));
+    const repeatedPractice = randomized.filter(q => q.source === 'question' && recentQuestionIds.has(getComparableQuestionId(q)));
+
+    return [
+        ...freshWritten,
+        ...freshPractice,
+        ...repeatedWritten,
+        ...repeatedPractice
+    ].slice(0, requiredCount);
+}
+
 /**
  * Generates 82 random exam questions according to the official 120-point distribution.
  * Questions are grouped by topic and selected by question type.
  * @returns Array of question IDs sorted by topic
  */
-export async function generateExamQuestions(): Promise<string[]> {
-    const allQuestionIds: string[] = [];
+export async function generateExamQuestions(userId?: string): Promise<string[]> {
+    const recentQuestionIds = userId
+        ? new Set((await db.getRecentWrittenExamQuestionIds(userId, RECENT_EXAM_HISTORY_LIMIT)).map(normalizeQuestionHistoryId))
+        : new Set<string>();
 
-    for (const [topic, config] of Object.entries(FULL_EXAM_TOPIC_POINT_DISTRIBUTION)) {
-        const questions = await db.getWrittenExamQuestionsByTopic(topic, 1000);
+    const topicSelections = await Promise.all(Object.entries(FULL_EXAM_TOPIC_POINT_DISTRIBUTION).map(async ([topic, config]) => {
+        const [writtenQuestions, practiceQuestions] = await Promise.all([
+            db.getWrittenExamQuestionsByTopic(topic, 1000),
+            db.getPracticeQuestionsForWrittenExamTopic(topic, getModuleTitleForExamTopic(topic), 1000)
+        ]);
+        const questions: ExamQuestionCandidate[] = [
+            ...writtenQuestions.map(question => ({ ...question, source: 'written' as const })),
+            ...practiceQuestions.map(question => ({ ...question, source: 'question' as const }))
+        ];
         const single = questions.filter(q => getQuestionMaxPoints(q.correctAnswer) === 1);
         const multiple = questions.filter(q => getQuestionMaxPoints(q.correctAnswer) === 2);
 
@@ -28,12 +93,14 @@ export async function generateExamQuestions(): Promise<string[]> {
             );
         }
 
-        const selectedSingle = single.sort(() => Math.random() - 0.5).slice(0, config.single);
-        const selectedMultiple = multiple.sort(() => Math.random() - 0.5).slice(0, config.multiple);
-        const selectedQuestions = [...selectedSingle, ...selectedMultiple].sort(() => Math.random() - 0.5);
+        const selectedSingle = selectExamQuestionsByType(single, config.single, recentQuestionIds);
+        const selectedMultiple = selectExamQuestionsByType(multiple, config.multiple, recentQuestionIds);
+        const selectedQuestions = shuffle([...selectedSingle, ...selectedMultiple]);
 
-        allQuestionIds.push(...selectedQuestions.map(q => q.id));
-    }
+        return selectedQuestions.map(q => q.source === 'question' ? `question:${q.id}` : q.id);
+    }));
+
+    const allQuestionIds = topicSelections.flat();
 
     if (allQuestionIds.length !== FULL_EXAM_TOTAL_QUESTIONS) {
         throw new Error(

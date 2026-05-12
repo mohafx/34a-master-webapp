@@ -90,7 +90,7 @@ export default function WrittenExam() {
         setLoading(true);
 
         // Generate 82 random questions
-        const questionIds = await generateExamQuestions();
+        const questionIds = await generateExamQuestions(authUser?.id);
 
         // Create session (for logged in users) or use localStorage (for guests)
         let newSession: WrittenExamSession;
