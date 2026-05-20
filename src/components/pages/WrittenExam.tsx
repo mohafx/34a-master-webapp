@@ -212,8 +212,25 @@ export default function WrittenExam() {
         if (authUser) {
           const activeSession = await db.getActiveWrittenExamSession(authUser.id, 'full');
           if (activeSession) {
-            newSession = activeSession;
-            isResumedSession = true;
+            const remaining = getRemainingSeconds(activeSession);
+            if (remaining <= 0) {
+              console.log(`Auto-completing stale session ${activeSession.id} in the background.`);
+              try {
+                const answers = getBestAvailableAnswers(activeSession);
+                const loadedQuestions = await db.getWrittenExamQuestionsByIds(activeSession.questionIds);
+                const score = calculateExamPoints(loadedQuestions as WrittenExamQuestion[], answers);
+                await db.completeWrittenExamSession(activeSession.id, score, answers);
+                localStorage.removeItem(`${SESSION_SNAPSHOT_PREFIX}${activeSession.id}`);
+              } catch (err) {
+                console.error('Error auto-completing stale session:', err);
+              }
+              // Proceed to create a new session
+              const questionIds = await generateExamQuestions(authUser.id);
+              newSession = await db.createWrittenExamSession(authUser.id, questionIds);
+            } else {
+              newSession = activeSession;
+              isResumedSession = true;
+            }
           } else {
             const questionIds = await generateExamQuestions(authUser.id);
             newSession = await db.createWrittenExamSession(authUser.id, questionIds);
@@ -221,8 +238,45 @@ export default function WrittenExam() {
         } else {
           const activeGuestSession = readStoredSession(localStorage.getItem(ACTIVE_FULL_EXAM_SESSION_KEY));
           if (activeGuestSession && !activeGuestSession.completedAt && activeGuestSession.totalQuestions === 82) {
-            newSession = activeGuestSession;
-            isResumedSession = true;
+            const remaining = getRemainingSeconds(activeGuestSession);
+            if (remaining <= 0) {
+              console.log(`Auto-completing stale guest session ${activeGuestSession.id} in the background.`);
+              try {
+                const answers = getBestAvailableAnswers(activeGuestSession);
+                const loadedQuestions = await db.getWrittenExamQuestionsByIds(activeGuestSession.questionIds);
+                const score = calculateExamPoints(loadedQuestions as WrittenExamQuestion[], answers);
+                const completedSession = {
+                  ...activeGuestSession,
+                  completedAt: new Date().toISOString(),
+                  score,
+                  userAnswers: answers
+                };
+                writeStoredSession(completedSession);
+                localStorage.removeItem(ACTIVE_FULL_EXAM_SESSION_KEY);
+                localStorage.removeItem(`${SESSION_SNAPSHOT_PREFIX}${activeGuestSession.id}`);
+              } catch (err) {
+                console.error('Error auto-completing stale guest session:', err);
+              }
+              // Proceed to create a new session
+              const questionIds = await generateExamQuestions();
+              const guestSessionId = `guest_${Date.now()}`;
+              newSession = {
+                id: guestSessionId,
+                userId: 'guest',
+                questionIds,
+                userAnswers: {},
+                startedAt: new Date().toISOString(),
+                timeLimitMinutes: 120,
+                totalQuestions: 82,
+                examType: 'full'
+              };
+
+              writeStoredSession(newSession);
+              localStorage.setItem(ACTIVE_FULL_EXAM_SESSION_KEY, guestSessionId);
+            } else {
+              newSession = activeGuestSession;
+              isResumedSession = true;
+            }
           } else {
             const questionIds = await generateExamQuestions();
             const guestSessionId = `guest_${Date.now()}`;
