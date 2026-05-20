@@ -52,7 +52,7 @@ function readAnswerSnapshot(sessionId: string): Record<string, string> | null {
 
 export default function WrittenExam() {
   const navigate = useNavigate();
-  const { user: authUser } = useAuth();
+  const { user: authUser, loading: authLoading } = useAuth();
   const { settings } = useApp();
 
   const { trackEvent } = usePostHog();
@@ -195,6 +195,9 @@ export default function WrittenExam() {
 
   // Initialize exam session
   useEffect(() => {
+    if (authLoading) return;
+    if (sessionRef.current) return;
+
     const initializeKey = authUser?.id || 'guest';
     if (initializeKeyRef.current === initializeKey) return;
     initializeKeyRef.current = initializeKey;
@@ -277,7 +280,7 @@ export default function WrittenExam() {
     }
 
     initializeExam();
-  }, [authUser, navigate, trackEvent, getBestAvailableAnswers, completeSession]);
+  }, [authLoading, authUser, navigate, trackEvent, getBestAvailableAnswers, completeSession]);
 
   // Handle complete exam
   const handleCompleteExam = useCallback(async () => {

@@ -14,7 +14,7 @@ const MINI_EXAM_TIME_LIMIT_MINUTES = 20;
 
 export default function MiniExam() {
     const navigate = useNavigate();
-    const { user: authUser } = useAuth();
+    const { user: authUser, loading: authLoading } = useAuth();
     const { settings } = useApp();
 
     const { trackEvent } = usePostHog();
@@ -83,9 +83,22 @@ export default function MiniExam() {
 
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const sessionRef = useRef<WrittenExamSession | null>(null);
+    const initializeKeyRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        sessionRef.current = session;
+    }, [session]);
 
     // Initialize exam session
     useEffect(() => {
+        if (authLoading) return;
+        if (sessionRef.current) return;
+
+        const initializeKey = authUser?.id || 'guest';
+        if (initializeKeyRef.current === initializeKey) return;
+        initializeKeyRef.current = initializeKey;
+
         async function initializeExam() {
             try {
                 setLoading(true);
@@ -146,7 +159,7 @@ export default function MiniExam() {
         }
 
         initializeExam();
-    }, [authUser, navigate]);
+    }, [authLoading, authUser, navigate]);
 
     // Handle complete exam
     const handleCompleteExam = useCallback(async () => {
