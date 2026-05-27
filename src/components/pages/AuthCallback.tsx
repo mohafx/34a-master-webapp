@@ -10,7 +10,20 @@ export default function AuthCallback() {
         // Handle the OAuth callback
         const handleCallback = async () => {
             try {
-                // Supabase automatically handles the session from the URL hash
+                const hashQuery = window.location.hash.includes('?')
+                    ? window.location.hash.split('?')[1]
+                    : '';
+                const hashParams = new URLSearchParams(hashQuery);
+                const urlParams = new URLSearchParams(window.location.search);
+                const authCode = hashParams.get('code') || urlParams.get('code');
+
+                if (authCode) {
+                    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(authCode);
+                    if (exchangeError) {
+                        throw exchangeError;
+                    }
+                }
+
                 const { data: { session }, error } = await supabase.auth.getSession();
 
                 if (error) {

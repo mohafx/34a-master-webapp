@@ -28,6 +28,11 @@ export default function PaymentSuccess() {
     const [state, setState] = useState<VerificationState>(sessionId ? 'checking' : 'failed');
     const [details, setDetails] = useState<VerifyCheckoutResponse | null>(null);
     const hasRefreshedSubscriptionRef = useRef(false);
+    const refreshSubscriptionRef = useRef(refreshSubscription);
+
+    useEffect(() => {
+        refreshSubscriptionRef.current = refreshSubscription;
+    }, [refreshSubscription]);
 
     useEffect(() => {
         let cancelled = false;
@@ -51,11 +56,11 @@ export default function PaymentSuccess() {
             } else {
                 setDetails(data || null);
 
-                if (data?.isSuccess && data?.isPremium) {
+                if (data?.isSuccess && data?.paymentStatus === 'paid') {
                     setState('success');
                     if (user && !hasRefreshedSubscriptionRef.current) {
                         hasRefreshedSubscriptionRef.current = true;
-                        await refreshSubscription();
+                        await refreshSubscriptionRef.current();
                     }
                     return;
                 }
@@ -80,10 +85,11 @@ export default function PaymentSuccess() {
             cancelled = true;
             if (timeout) clearTimeout(timeout);
         };
-    }, [refreshSubscription, sessionId, user]);
+    }, [sessionId, user?.id]);
 
     const isGuest = details?.isGuest || details?.checkoutMode === 'guest' || (!user && state === 'success');
     const email = details?.email;
+    const activationPending = state === 'success' && details?.isPremium === false;
 
     const content = {
         checking: {
@@ -98,9 +104,13 @@ export default function PaymentSuccess() {
             icon: <CheckCircle size={44} className="text-green-500" strokeWidth={1.8} />,
             iconBg: 'bg-green-50',
             title: 'Zahlung erfolgreich',
-            text: 'Premium wurde aktiviert. Du hast jetzt vollen Zugriff auf alle Lerninhalte und Prüfungsfragen.',
-            panelTitle: isGuest ? 'Konto per E-Mail aktivieren' : 'Premium ist aktiv',
-            panelText: isGuest
+            text: activationPending
+                ? 'Deine Zahlung wurde bestätigt. Wir aktualisieren deinen Premium-Zugang automatisch.'
+                : 'Premium wurde aktiviert. Du hast jetzt vollen Zugriff auf alle Lerninhalte und Prüfungsfragen.',
+            panelTitle: activationPending ? 'Aktivierung läuft' : isGuest ? 'Konto per E-Mail aktivieren' : 'Premium ist aktiv',
+            panelText: activationPending
+                ? 'Falls Premium nicht sofort sichtbar ist, öffne die App neu oder melde dich kurz erneut an.'
+                : isGuest
                 ? `Wir haben dir${email ? ` an ${email}` : ''} eine E-Mail geschickt. Öffne den Link, um dein Passwort festzulegen.`
                 : 'Du kannst jetzt direkt weiterlernen.',
         },
