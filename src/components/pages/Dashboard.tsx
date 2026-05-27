@@ -8,6 +8,7 @@ import { usePostHog } from '../../contexts/PostHogProvider';
 import { AuthDialog } from '../auth/AuthDialog';
 import { DashboardStats } from '../dashboard/DashboardStats';
 import { TransitionAccessNotice } from '../TransitionAccessNotice';
+import { db } from '../../services/database';
 import { getCompletedLessonCountForModule } from '../../services/lessonFlow';
 import { isAdminEmail } from '../../utils/userRoles';
 import { getEffectiveExamDate, setEffectiveExamDate } from '../../utils/appStorage';
@@ -286,12 +287,19 @@ export default function Dashboard() {
                   Abbrechen
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const value = (document.getElementById('dashboard-exam-date-picker') as HTMLInputElement).value;
                     if (value) {
                       setEffectiveExamDate(value);
                       setExamDate(value);
                       window.dispatchEvent(new Event('storage'));
+                      if (user) {
+                        try {
+                          await db.updateExamDate(user.id, value);
+                        } catch (error) {
+                          console.error('Error saving exam date:', error);
+                        }
+                      }
                     }
                     setShowDatePicker(false);
                   }}

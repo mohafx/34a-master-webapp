@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { capturePostHog, capturePostHogEvent, identifyPostHogUser } from "../_shared/posthog.ts";
+import { finalizePaidCheckoutSession } from "../_shared/checkout-finalization.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
     apiVersion: "2024-06-20",
@@ -367,7 +368,6 @@ serve(async (req) => {
 
 async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
     const userId = session.client_reference_id || session.metadata?.user_id;
-    const subscriptionId = session.subscription as string;
     const planType = session.metadata?.plan_type || 'monthly';
 
     if (!userId) {
@@ -382,53 +382,13 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     }
 
     console.log(`[webhook] handleCheckoutSessionCompleted: userId=${userId}, mode=${session.mode}, plan=${planType}`);
-    await capturePaymentSucceeded(session, userId);
-
-    // Handle subscription mode
-    if (session.mode === 'subscription' && subscriptionId) {
-        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-
-        await upsertSubscription({
-            userId,
-            subscriptionId,
-            customerId: session.customer as string,
-            status: subscription.status,
-            plan: planType,
-            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-        });
-        console.log(`[webhook] Subscription created for user ${userId}`);
-        return;
-    }
-
-    // Handle payment mode (one-time purchase like 6 months)
-    if (session.mode === 'payment' && session.payment_status === 'paid') {
-        const expiresAt = new Date();
-        expiresAt.setMonth(expiresAt.getMonth() + 6);
-
-        await upsertSubscription({
-            userId,
-            subscriptionId: 'payment_' + session.id,
-            customerId: session.customer as string || 'unknown',
-            status: 'active',
-            plan: planType === 'monthly' ? '6months' : planType,
-            currentPeriodEnd: expiresAt,
-        });
-        console.log(`[webhook] One-time payment recorded for user ${userId}`);
-        await activateTikTokLernplan(session.metadata?.tiktok_lernplan_id, userId);
-
-        // Send recovery email for guest checkout users so they can set a password
-        if (session.metadata?.guest_checkout === 'true' && session.customer_email) {
-            try {
-                await sendGuestRegistrationEmail(session.customer_email);
-            } catch (emailErr: any) {
-                // Non-fatal — payment was still successful
-                console.error(`[webhook] Error sending recovery email:`, emailErr?.message);
-            }
-        }
-        return;
-    }
-
-    console.log(`[webhook] Session mode ${session.mode} not handled or payment not complete`);
+    await finalizePaidCheckoutSession({
+        session,
+        stripe,
+        supabaseAdmin,
+        supabaseAuthClient,
+        source: "stripe_webhook",
+    });
 }
 
 async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {

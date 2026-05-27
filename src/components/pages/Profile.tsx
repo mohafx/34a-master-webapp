@@ -27,9 +27,16 @@ export default function Profile() {
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  const handleSetExamDate = (date: string) => {
+  const handleSetExamDate = async (date: string) => {
     setEffectiveExamDate(date);
     setExamDate(date);
+    if (authUser) {
+      try {
+        await db.updateExamDate(authUser.id, date);
+      } catch (error) {
+        console.error('Error saving exam date:', error);
+      }
+    }
     setShowDatePicker(false);
   };
 

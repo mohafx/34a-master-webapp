@@ -116,7 +116,7 @@ interface PaywallViewProps {
 }
 
 export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPlanPayload }: PaywallViewProps) {
-    const { openCheckout, loading: subscriptionLoading, processPaymentSuccess } = useSubscription();
+    const { openCheckout, loading: subscriptionLoading } = useSubscription();
     const { user } = useAuth();
     const { language, openAuthDialog, toggleLanguage } = useApp();
     const { trackEvent } = usePostHog();
@@ -176,6 +176,22 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
     // Refs for scroll container auto-open
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const vsRef = useRef<HTMLDivElement | null>(null);
+
+    const requireAccountBeforeCheckout = () => {
+        setGuestMode(null);
+        setGuestError('');
+        openAuthDialog('register', {
+            de: 'Erstelle ein Konto oder melde dich an, um Premium freizuschalten.',
+            ar: 'أنشئ حساباً أو سجّل الدخول لتفعيل الاشتراك المميز.'
+        });
+        trackEvent('paywall_auth_required', {
+            feature_name: featureName,
+            source: isEmbedded ? 'onboarding' : 'dialog'
+        });
+        if (isTikTokPaywall) {
+            trackTikTokPaywallEvent('tiktok_paywall_auth_required');
+        }
+    };
 
     const checkScroll = () => {
         if (!scrollRef.current) return;
@@ -386,7 +402,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
         if (isTikTokPaywall) {
             trackTikTokPaywallEvent('tiktok_paywall_checkout_clicked', {
                 blocked: false,
-                checkout_mode: user ? 'authenticated' : 'guest',
+                checkout_mode: user ? 'authenticated' : 'auth_required',
             });
         }
 
@@ -394,31 +410,25 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
             // Authenticated user — normal flow
             await proceedToCheckout();
         } else {
-            // Guest — show email input
-            setGuestMode('email');
-            setGuestError('');
-            if (isTikTokPaywall) {
-                trackTikTokPaywallEvent('tiktok_guest_email_started');
-            }
+            requireAccountBeforeCheckout();
         }
     };
 
-    const handlePaymentComplete = async () => {
+    const handlePaymentComplete = async (completedSessionId?: string) => {
         setSuccessMode(true);
-        const sessionId = clientSecret?.split('_secret_')[0];
+        const sessionId = completedSessionId || clientSecret?.split('_secret_')[0];
         if (isTikTokPaywall) {
             trackTikTokPaywallEvent('tiktok_checkout_completed_client', {
-                checkout_mode: user ? 'authenticated' : 'guest',
+                checkout_mode: user ? 'authenticated' : 'auth_required',
                 completion_source: 'paywall',
             });
         }
-        if (user) {
-            await processPaymentSuccess();
-            setTimeout(() => { onClose?.(); }, 2000);
-        } else if (sessionId) {
+
+        if (sessionId) {
             setTimeout(() => {
-                window.location.hash = `/guest-payment-success?session_id=${encodeURIComponent(sessionId)}`;
-            }, 1200);
+                window.location.hash = `/payment-success?session_id=${encodeURIComponent(sessionId)}`;
+                onClose?.();
+            }, 300);
         }
     };
 
@@ -548,7 +558,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                 clientSecret={clientSecret}
                                 onComplete={handlePaymentComplete}
                                 trackingContext={isTikTokPaywall ? getTikTokPaywallContext({
-                                    checkout_mode: user ? 'authenticated' : 'guest',
+                                    checkout_mode: user ? 'authenticated' : 'auth_required',
                                 }) : undefined}
                             />
                         </div>
@@ -822,7 +832,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                         )}
                                         <div className="flex items-center justify-between pt-1">
                                             <button
-                                                onClick={() => { setGuestMode('email'); setGuestError(''); }}
+                                                onClick={() => { setGuestMode(null); setGuestError(''); }}
                                                 className="text-[12px] text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
                                             >
                                                 ← Zurück

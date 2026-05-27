@@ -7,7 +7,7 @@ import { trackTikTokServerEvent } from '../utils/tiktokAnalytics';
 
 interface EmbeddedPaymentProps {
     clientSecret: string;
-    onComplete?: () => void;
+    onComplete?: (sessionId: string) => void | Promise<void>;
     trackingContext?: AnalyticsEventProperties;
 }
 
@@ -25,8 +25,6 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
     const [loading, setLoading] = useState(true);
     const onCompleteCalledRef = useRef(false);
     const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const initialSubscriptionCheckedRef = useRef(false);
-    const hadSubscriptionOnMountRef = useRef(false);
     const checkoutContainerRef = useRef<HTMLDivElement | null>(null);
     const embeddedCheckoutRef = useRef<StripeEmbeddedCheckout | null>(null);
     const stripeMountNodeRef = useRef<HTMLDivElement | null>(null);
@@ -72,21 +70,6 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
             }
             return;
         }
-
-        // IMPORTANT: Check if user already has a subscription BEFORE we start polling
-        // This prevents false positives when user cancels Klarna and returns
-        const checkInitialSubscription = async () => {
-            try {
-                const { data } = await supabase.functions.invoke('sync-subscription');
-                hadSubscriptionOnMountRef.current = data?.restored === true;
-                initialSubscriptionCheckedRef.current = true;
-                console.log('[EmbeddedPayment] Initial subscription check:', hadSubscriptionOnMountRef.current);
-            } catch (err) {
-                console.error('[EmbeddedPayment] Initial check failed:', err);
-                initialSubscriptionCheckedRef.current = true;
-            }
-        };
-        checkInitialSubscription();
 
         try {
             const promise = loadStripe(key);
@@ -169,15 +152,14 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
         };
     }, [clientSecret]);
 
-    // FALLBACK: Poll for payment completion with exponential backoff
-    // CRITICAL: Only trigger success if subscription state CHANGED from false to true
-    // Changed from 2s interval x 60 to exponential backoff: 3s, 5s, 8s, 12s, 18s (5 attempts max)
+    // FALLBACK: Poll the specific Checkout Session.
+    // This catches cases where Embedded Checkout shows success but does not invoke onComplete.
     useEffect(() => {
         if (loading) return;
 
         let pollCount = 0;
-        const maxPolls = 5; // Reduced from 60 - webhook should arrive within ~20s usually
-        const backoffDelays = [3000, 5000, 8000, 12000, 18000]; // Exponential backoff
+        const maxPolls = 10;
+        const backoffDelays = [3000, 5000, 8000, 12000, 18000];
         const sessionId = clientSecret.split('_secret_')[0];
 
         const currentTrackingContext = trackingContextRef.current;
@@ -192,22 +174,17 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
         }
 
         const checkPaymentStatus = async () => {
-            // Wait until initial check is complete
-            if (!initialSubscriptionCheckedRef.current) {
-                scheduleNextPoll();
-                return;
-            }
-
             pollCount++;
             console.log(`[EmbeddedPayment] Polling attempt ${pollCount}/${maxPolls}`);
 
             try {
-                const { data } = await supabase.functions.invoke('sync-subscription');
-                const hasSubscriptionNow = data?.restored === true;
+                const { data, error: verifyError } = await supabase.functions.invoke('verify-checkout', {
+                    body: { sessionId },
+                });
+                if (verifyError) throw verifyError;
 
-                // SUCCESS CONDITION: User did NOT have subscription on mount, but NOW has one
-                if (hasSubscriptionNow && !hadSubscriptionOnMountRef.current && !onCompleteCalledRef.current) {
-                    console.log('[EmbeddedPayment] NEW subscription detected via polling');
+                if (data?.isSuccess && data?.paymentStatus === 'paid' && !onCompleteCalledRef.current) {
+                    console.log('[EmbeddedPayment] Paid checkout detected via polling');
                     onCompleteCalledRef.current = true;
                     const currentTrackingContext = trackingContextRef.current;
                     if (currentTrackingContext) {
@@ -222,10 +199,10 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
 
                     setTimeout(() => {
                         if (isMountedRef.current && onCompleteRef.current) {
-                            onCompleteRef.current();
+                            onCompleteRef.current(sessionId);
                         }
                     }, 500);
-                    return; // Stop polling
+                    return;
                 }
             } catch (err) {
                 console.error('[EmbeddedPayment] Polling error:', err);
@@ -271,13 +248,14 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
             return; // Already called via polling
         }
 
+        const sessionId = clientSecret.split('_secret_')[0];
         console.log('[EmbeddedPayment] Stripe onComplete callback fired');
         onCompleteCalledRef.current = true;
         const currentTrackingContext = trackingContextRef.current;
         if (currentTrackingContext) {
             const context = {
                 ...currentTrackingContext,
-                checkout_session_id: clientSecret.split('_secret_')[0],
+                checkout_session_id: sessionId,
                 completion_source: 'stripe_callback',
             };
             trackEvent('tiktok_checkout_completed_client', context);
@@ -292,7 +270,7 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
         // Small delay to show Stripe's success animation
         setTimeout(() => {
             if (isMountedRef.current && onCompleteRef.current) {
-                onCompleteRef.current();
+                onCompleteRef.current(sessionId);
             }
         }, 1500);
     }, [clientSecret, trackEvent]);

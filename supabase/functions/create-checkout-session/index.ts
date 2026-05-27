@@ -130,6 +130,7 @@ serve(async (req) => {
             metadata.tiktok_lernplan_id = tiktokLernplanId;
         }
 
+        const origin = req.headers.get("origin") || Deno.env.get("SITE_URL") || "https://34a-master.app";
         const session = await stripe.checkout.sessions.create({
             // Note: payment_method_types is required for embedded checkout
             // Apple Pay/Google Pay appear automatically on compatible devices when 'card' is included
@@ -142,7 +143,8 @@ serve(async (req) => {
             ],
             mode: "payment",
             ui_mode: 'embedded',
-            return_url: `${req.headers.get("origin")}/#/profile?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+            redirect_on_completion: 'always',
+            return_url: `${origin}/#/payment-success?session_id={CHECKOUT_SESSION_ID}`,
             customer_email: user.email,
             customer_creation: 'always',
             client_reference_id: user.id,

@@ -1,7 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { capturePostHog, capturePostHogEvent, identifyPostHogUser } from "../_shared/posthog.ts";
+import {
+    finalizePaidCheckoutSession,
+    getCheckoutMode,
+    getUserEmail,
+    normalizePlan,
+} from "../_shared/checkout-finalization.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
     apiVersion: "2024-06-20",
@@ -19,139 +24,24 @@ const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const supabaseAdmin = createClient(
     supabaseUrl,
     supabaseServiceRoleKey,
-    { auth: { autoRefreshToken: false, persistSession: false } }
+    { auth: { autoRefreshToken: false, persistSession: false } },
 );
 
 const supabaseAuthClient = createClient(supabaseUrl, supabaseAnonKey, {
     auth: { autoRefreshToken: false, persistSession: false },
 });
 
-function getStripeId(value: string | { id?: string } | null | undefined): string {
-    if (!value) return "";
-    return typeof value === "string" ? value : value.id || "";
-}
-
-function getUserEmail(session: Stripe.Checkout.Session): string | null {
-    return session.customer_details?.email || session.customer_email || session.metadata?.guest_email || null;
-}
-
-function normalizePlan(planType: string | undefined | null): string {
-    return planType && planType !== "monthly" ? planType : "6months";
-}
-
-async function upsertSubscription({
-    userId,
-    userEmail,
-    subscriptionId,
-    customerId,
-    status,
-    plan,
-    currentPeriodEnd,
-}: {
-    userId: string;
-    userEmail: string | null;
-    subscriptionId: string;
-    customerId: string;
-    status: string;
-    plan: string;
-    currentPeriodEnd: Date;
-}) {
-    const { data: existing, error: findError } = await supabaseAdmin
-        .from('subscriptions')
-        .select('id')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-    if (findError) {
-        throw findError;
-    }
-
-    const payload = {
-        status,
-        plan,
-        provider: 'stripe',
-        provider_customer_id: customerId || 'unknown',
-        provider_subscription_id: subscriptionId,
-        user_email: userEmail,
-        current_period_end: currentPeriodEnd.toISOString(),
-        updated_at: new Date().toISOString(),
-    };
-
-    if (existing) {
-        const { error } = await supabaseAdmin
-            .from('subscriptions')
-            .update(payload)
-            .eq('id', existing.id);
-        if (error) throw error;
-        console.log(`[verify-checkout] Updated subscription for user ${userId}: ${status}`);
-        return;
-    }
-
-    const { error } = await supabaseAdmin
-        .from('subscriptions')
-        .insert({
-            user_id: userId,
-            ...payload,
-        });
-    if (error) throw error;
-    console.log(`[verify-checkout] Inserted subscription for user ${userId}: ${status}`);
-}
-
-async function sendGuestRegistrationEmail(email: string): Promise<void> {
-    if (!supabaseUrl || !supabaseAnonKey) {
-        console.error("[verify-checkout] Cannot send recovery email: missing SUPABASE_URL or SUPABASE_ANON_KEY");
-        return;
-    }
-
-    const siteUrl = Deno.env.get("SITE_URL") || "https://34a-master.app";
-    const { error } = await supabaseAuthClient.auth.resetPasswordForEmail(email, {
-        redirectTo: `${siteUrl}/#/complete-registration`,
-    });
-
-    if (error) {
-        console.error(`[verify-checkout] Failed to send recovery email to ${email}:`, error);
-        return;
-    }
-
-    console.log(`[verify-checkout] Recovery email sent to ${email} for guest checkout`);
-}
-
-async function activateTikTokLernplan(tiktokLernplanId: string | undefined, userId: string | undefined): Promise<void> {
-    if (!tiktokLernplanId || !userId) return;
-
-    const { data, error } = await supabaseAdmin
-        .from('user_lernplans')
-        .update({
-            status: 'active',
-            activated_at: new Date().toISOString(),
-        })
-        .eq('id', tiktokLernplanId)
-        .eq('user_id', userId)
-        .select('id,status,test_score,test_total,weak_topics')
-        .maybeSingle();
-
-    if (error) {
-        console.error(`[verify-checkout] Failed to activate TikTok Lernplan ${tiktokLernplanId}:`, error);
-        await capturePostHog("tiktok_plan_activation_failed", userId, {
-            tiktok_lernplan_id: tiktokLernplanId,
-            plan_status: "activation_failed",
-            error_message: error.message,
-        });
-        return;
-    }
-
-    await capturePostHog("tiktok_plan_activated", userId, {
-        tiktok_lernplan_id: tiktokLernplanId,
-        plan_status: data?.status || "active",
-        test_score: data?.test_score ?? null,
-        test_total: data?.test_total ?? null,
-        weak_topic_count: Array.isArray(data?.weak_topics) ? data.weak_topics.length : 0,
-    });
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+    return new Response(
+        JSON.stringify(body),
+        { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
 }
 
 /**
- * Verifies a Stripe Checkout Session and returns its actual status.
- * This is used to prevent false success on Klarna cancel.
+ * Verifies a Stripe Checkout Session and finalizes successful payments.
+ * This endpoint is intentionally session-based so the frontend can recover
+ * when Embedded Checkout shows success but does not invoke its callback.
  */
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -161,206 +51,81 @@ serve(async (req) => {
     try {
         const { sessionId } = await req.json();
 
-        if (!sessionId) {
-            return new Response(
-                JSON.stringify({ error: "sessionId is required" }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-            );
+        if (!sessionId || typeof sessionId !== "string") {
+            return jsonResponse({ error: "sessionId is required", isSuccess: false }, 400);
         }
 
         console.log(`[verify-checkout] Checking session: ${sessionId}`);
 
-        // Retrieve the checkout session from Stripe
         const session = await stripe.checkout.sessions.retrieve(sessionId, {
-            expand: ['subscription', 'payment_intent']
+            expand: ["subscription", "payment_intent"],
         });
 
-        console.log(`[verify-checkout] Session status: ${session.status}, payment_status: ${session.payment_status}`);
+        const checkoutMode = getCheckoutMode(session);
+        const isGuest = checkoutMode === "guest";
+        const email = getUserEmail(session);
+        const plan = normalizePlan(session.metadata?.plan_type);
+        const isSuccess = session.status === "complete" && session.payment_status === "paid";
 
-        // Determine if payment was actually successful
-        const isSuccess =
-            session.status === 'complete' &&
-            session.payment_status === 'paid';
-
-        if (isSuccess) {
-            const userId = session.client_reference_id || session.metadata?.user_id;
-            const checkoutMode = session.metadata?.guest_checkout === "true" ? "guest" : "authenticated";
-            const paidAt = new Date((session.created || Math.floor(Date.now() / 1000)) * 1000).toISOString();
-            const userEmail = getUserEmail(session);
-
-            if (userId) {
-                if (session.mode === 'payment') {
-                    const currentPeriodEnd = new Date((session.created || Math.floor(Date.now() / 1000)) * 1000);
-                    currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 6);
-
-                    await upsertSubscription({
-                        userId,
-                        userEmail,
-                        subscriptionId: `session_${session.id}`,
-                        customerId: getStripeId(session.customer),
-                        status: 'active',
-                        plan: normalizePlan(session.metadata?.plan_type),
-                        currentPeriodEnd,
-                    });
-                } else if (session.mode === 'subscription' && session.subscription) {
-                    const subscription = typeof session.subscription === 'string'
-                        ? await stripe.subscriptions.retrieve(session.subscription)
-                        : session.subscription;
-                    const effectiveStatus = subscription.cancel_at_period_end && subscription.status === 'active'
-                        ? 'canceled'
-                        : subscription.status;
-
-                    await upsertSubscription({
-                        userId,
-                        userEmail,
-                        subscriptionId: subscription.id,
-                        customerId: getStripeId(subscription.customer),
-                        status: effectiveStatus,
-                        plan: session.metadata?.plan_type || subscription.metadata?.plan_type || 'monthly',
-                        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-                    });
-                }
-
-                if (session.metadata?.guest_checkout === 'true' && userEmail) {
-                    await sendGuestRegistrationEmail(userEmail);
-                }
-            } else {
-                console.error(`[verify-checkout] Successful session ${session.id} has no user_id`);
-            }
-
-            await identifyPostHogUser(userId, session.metadata?.session_funnel_id, {
-                source: "verify_checkout",
-                checkout_session_id: session.id,
-            });
-            await capturePostHogEvent("payment_succeeded_server", {
-                distinctId: userId,
-                timestamp: paidAt,
-                properties: {
-                    tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
-                    checkout_session_id: session.id,
-                    payment_status: session.payment_status,
-                    plan: session.metadata?.plan_type,
-                    checkout_mode: checkoutMode,
-                    email: session.customer_email || session.metadata?.guest_email,
-                    source: "verify_checkout",
-                    session_funnel_id: session.metadata?.session_funnel_id,
-                    funnel: session.metadata?.funnel,
-                    stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id,
-                    amount_total: session.amount_total,
-                    currency: session.currency,
-                },
-                set: {
-                    email: session.customer_email || session.metadata?.guest_email || null,
-                    is_premium: true,
-                    premium_source: "stripe",
-                    premium_plan: session.metadata?.plan_type,
-                    last_payment_at: paidAt,
-                    stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id,
-                },
-                setOnce: {
-                    first_payment_at: paidAt,
-                    first_paid_plan: session.metadata?.plan_type,
-                    first_checkout_mode: checkoutMode,
-                },
-            });
-            if (session.metadata?.tiktok_lernplan_id || session.metadata?.funnel === "tiktok_pruefungscheck") {
-                await capturePostHog("tiktok_payment_succeeded_server", userId, {
-                    funnel: "tiktok_pruefungscheck",
-                    funnel_version: "2026-04-29",
-                    source: "verify_checkout",
-                    tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
-                    checkout_session_id: session.id,
-                    payment_status: session.payment_status,
-                    plan_status: "payment_succeeded",
-                    session_funnel_id: session.metadata?.session_funnel_id,
-                    checkout_mode: checkoutMode,
-                });
-            }
-            await activateTikTokLernplan(
-                session.metadata?.tiktok_lernplan_id,
-                userId,
-            );
-        } else {
-            await capturePostHog("payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
-                tiktok_lernplan_id: session.metadata?.tiktok_lernplan_id,
-                checkout_session_id: session.id,
-                payment_status: session.payment_status,
-                plan: session.metadata?.plan_type,
-                checkout_mode: session.metadata?.guest_checkout === "true" ? "guest" : "authenticated",
-                email: session.customer_email,
-                source: "verify_checkout",
-            });
-            if (session.metadata?.tiktok_lernplan_id) {
-                await capturePostHog("tiktok_payment_failed_server", session.client_reference_id || session.metadata?.user_id, {
-                    funnel: "tiktok_pruefungscheck",
-                    funnel_version: "2026-04-29",
-                    source: "verify_checkout",
-                    tiktok_lernplan_id: session.metadata.tiktok_lernplan_id,
-                    checkout_session_id: session.id,
-                    payment_status: session.payment_status,
-                    plan_status: "pending_payment",
-                });
-            }
-        }
-
-        // Get subscription status if exists
-        let subscriptionStatus = null;
+        let subscriptionStatus: string | null = null;
         if (session.subscription) {
-            const subscription = typeof session.subscription === 'string'
+            const subscription = typeof session.subscription === "string"
                 ? await stripe.subscriptions.retrieve(session.subscription)
                 : session.subscription;
             subscriptionStatus = subscription.status;
-            console.log(`[verify-checkout] Subscription status: ${subscriptionStatus}`);
         }
 
-        // Get payment intent status if exists
-        let paymentIntentStatus = null;
+        let paymentIntentStatus: string | null = null;
         if (session.payment_intent) {
-            const pi = typeof session.payment_intent === 'string'
+            const paymentIntent = typeof session.payment_intent === "string"
                 ? await stripe.paymentIntents.retrieve(session.payment_intent)
                 : session.payment_intent;
-            paymentIntentStatus = pi.status;
-            console.log(`[verify-checkout] PaymentIntent status: ${paymentIntentStatus}`);
+            paymentIntentStatus = paymentIntent.status;
+        }
+
+        let isPremium = (subscriptionStatus === "active" || subscriptionStatus === "trialing") ||
+            (session.mode === "payment" && session.payment_status === "paid");
+
+        if (isSuccess) {
+            const result = await finalizePaidCheckoutSession({
+                session,
+                stripe,
+                supabaseAdmin,
+                supabaseAuthClient,
+                source: "verify_checkout",
+            });
+            isPremium = result.isPremium;
         }
 
         const response = {
             sessionId,
             isSuccess,
+            isPremium,
             sessionStatus: session.status,
             paymentStatus: session.payment_status,
             subscriptionStatus,
             paymentIntentStatus,
             mode: session.mode,
-            // Active subscription OR successful one-time payment counts as Premium
-            isPremium: (subscriptionStatus === 'active' || subscriptionStatus === 'trialing') ||
-                (session.mode === 'payment' && session.payment_status === 'paid')
+            checkoutMode,
+            isGuest,
+            email,
+            plan,
         };
 
-        console.log(`[verify-checkout] Result:`, response);
-
-        return new Response(
-            JSON.stringify(response),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-
+        console.log("[verify-checkout] Result:", response);
+        return jsonResponse(response);
     } catch (error: any) {
-        console.error(`[verify-checkout] Error:`, error);
+        console.error("[verify-checkout] Error:", error);
 
-        // Check if it's a Stripe "no such session" error
-        if (error.code === 'resource_missing') {
-            return new Response(
-                JSON.stringify({
-                    isSuccess: false,
-                    error: 'Session not found',
-                    sessionStatus: 'not_found'
-                }),
-                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
+        if (error.code === "resource_missing") {
+            return jsonResponse({
+                isSuccess: false,
+                isPremium: false,
+                error: "Session not found",
+                sessionStatus: "not_found",
+            });
         }
 
-        return new Response(
-            JSON.stringify({ error: error.message, isSuccess: false }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-        );
+        return jsonResponse({ error: error.message, isSuccess: false, isPremium: false }, 400);
     }
 });

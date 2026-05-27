@@ -262,9 +262,22 @@ export default function Lernplan({ embedded = false, active = true }: { embedded
     createPlan('create_plan');
   };
 
-  const handleCreateWithDate = (selectedDate: string) => {
+  const saveExamDate = async (selectedDate: string) => {
     localStorage.setItem('examDate', selectedDate);
     setExamDate(selectedDate);
+    window.dispatchEvent(new Event('storage'));
+
+    if (authUser) {
+      try {
+        await db.updateExamDate(authUser.id, selectedDate);
+      } catch (error) {
+        console.error('[Lernplan] Exam date could not be saved:', error);
+      }
+    }
+  };
+
+  const handleCreateWithDate = async (selectedDate: string) => {
+    await saveExamDate(selectedDate);
     
     // Automatically trigger plan generation after date is set
     // We can't use the state immediate because setExamDate is async
@@ -586,12 +599,10 @@ export default function Lernplan({ embedded = false, active = true }: { embedded
                 Abbrechen
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   const value = (document.getElementById('exam-date-picker') as HTMLInputElement).value;
                   if (value) {
-                    localStorage.setItem('examDate', value);
-                    setExamDate(value);
-                    window.dispatchEvent(new Event('storage'));
+                    await saveExamDate(value);
                     const exam = new Date(value);
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);

@@ -45,6 +45,7 @@ import FirstTimeOnboarding from './components/onboarding/FirstTimeOnboarding';
 import { LocalDevPanel } from './components/devpanel/LocalDevPanel';
 import { DevPanelProvider, useDevPanel } from './devpanel/DevPanelContext';
 import {
+  getEffectiveExamDate,
   getEffectiveLanguage,
   getEffectiveSettings,
   hasCompletedOnboarding,
@@ -80,6 +81,7 @@ const WrongAnswersList = lazy(() => import('./components/pages/WrongAnswersList'
 const BookmarkList = lazy(() => import('./components/pages/BookmarkList'));
 const CompleteRegistration = lazy(() => import('./components/pages/CompleteRegistration'));
 const GuestPaymentSuccess = lazy(() => import('./components/pages/GuestPaymentSuccess'));
+const PaymentSuccess = lazy(() => import('./components/pages/PaymentSuccess'));
 // Admin
 const AdminDashboard = lazy(() => import('./components/pages/admin/AdminDashboard'));
 const AdminGuard = lazy(() => import('./components/pages/admin/AdminGuard'));
@@ -294,6 +296,17 @@ function AppContent() {
   const openPaywall = (featureName?: string) => {
     if (isPremium) return; // Already premium — never show paywall
     setPaywallFeatureName(featureName);
+    if (!authUser) {
+      setPendingAction('open_paywall');
+      setAuthDialogMode('register');
+      setAuthDialogMessage({
+        de: 'Erstelle ein Konto oder melde dich an, um Premium freizuschalten.',
+        ar: 'أنشئ حساباً أو سجّل الدخول لتفعيل الاشتراك المميز.'
+      });
+      setShowPaywallDialog(false);
+      setShowAuthDialog(true);
+      return;
+    }
     setShowPaywallDialog(true);
   };
 
@@ -356,6 +369,17 @@ function AppContent() {
               setTimeout(() => reject(new Error('Profile load timeout')), 5000)
             )
           ]) as any;
+
+          if (profile?.exam_date) {
+            setEffectiveExamDate(profile.exam_date);
+          } else {
+            const localExamDate = getEffectiveExamDate();
+            if (localExamDate) {
+              db.updateExamDate(authUser.id, localExamDate).catch(err =>
+                console.error('Error syncing exam date:', err)
+              );
+            }
+          }
 
           if (profile?.settings) {
             // Merge DB settings with local settings (DB takes precedence if conflict, but preserving keys)
@@ -770,7 +794,13 @@ function AppContent() {
           // Handle Exam Date
           if (data.examDate) {
             setEffectiveExamDate(data.examDate);
-            // We only save to local storage for now without an explicit user row update in Supabase
+            if (authUser) {
+              try {
+                await db.updateExamDate(authUser.id, data.examDate);
+              } catch (error) {
+                console.error('Error saving exam date:', error);
+              }
+            }
           }
 
           // Handle Language
@@ -859,6 +889,7 @@ function AppContent() {
                     <Route path="/email-confirmation" element={<EmailConfirmation />} />
                     <Route path="/reset-password" element={<ResetPassword />} />
                     <Route path="/complete-registration" element={<Suspense fallback={<SplashScreen />}><CompleteRegistration /></Suspense>} />
+                    <Route path="/payment-success" element={<Suspense fallback={<SplashScreen />}><PaymentSuccess /></Suspense>} />
                     <Route path="/guest-payment-success" element={<Suspense fallback={<SplashScreen />}><GuestPaymentSuccess /></Suspense>} />
                     <Route path="/auth/callback" element={<AuthCallback />} />
                     <Route path="/impressum" element={<Impressum />} />

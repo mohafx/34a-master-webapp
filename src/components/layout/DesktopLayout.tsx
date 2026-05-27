@@ -16,6 +16,8 @@ export default function DesktopLayout({ children }: DesktopLayoutProps) {
         '/written-exam',
         '/quiz',
         '/forderung',
+        '/payment-success',
+        '/guest-payment-success',
     ];
 
     const shouldHideSidebar = hideSidebarRoutes.some(route =>

@@ -41,7 +41,6 @@ interface SubscriptionContextType {
   restorePurchases: () => Promise<void>;
   manageSubscription: () => Promise<void>;
   openCheckout: (plan: '6months', options?: CheckoutOptions) => Promise<string | null>;
-  processPaymentSuccess: () => Promise<void>;
   markTransitionNotice: (stage: TransitionNoticeStage) => Promise<void>;
   transitionNoticeReplayNonce: number;
 }
@@ -358,101 +357,13 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         throw new Error('No client secret returned from server');
       }
 
-      trackEvent('checkout_started', { plan: plan, price: 9, has_tiktok_plan: Boolean(options.tiktokPlanPayload) });
+      trackEvent('checkout_started', { plan: plan, price: 19, has_tiktok_plan: Boolean(options.tiktokPlanPayload) });
 
       console.log('Got clientSecret, length:', data.clientSecret?.length);
       return data.clientSecret;
     } catch (err) {
       console.error('Error creating checkout session:', err);
       throw err;
-    }
-  };
-
-  // Called directly after embedded checkout completes - more reliable than URL-based detection
-  const processPaymentSuccess = async () => {
-    if (isOverrideActive) {
-      toast.success('Premium ist im Dev-Panel lokal aktiv.');
-      return;
-    }
-
-    // Guest checkout: user is not yet logged in — handled by GuestPaymentSuccess page
-    if (!user) {
-      toast.success('Zahlung erfolgreich! Prüfe deine E-Mail, um dein Konto zu aktivieren.');
-      return;
-    }
-
-    const debugLog = (msg: string, data?: any) => {
-      const ts = new Date().toISOString().substr(11, 12);
-      console.log(`[PAYMENT-SUCCESS ${ts}] ${msg}`, data || '');
-    };
-
-    debugLog('processPaymentSuccess CALLED');
-    setLoading(true);
-
-    try {
-      // Sync from Stripe to ensure database is updated
-      debugLog('Calling sync-subscription edge function...');
-      const { data: syncData, error: syncError } = await supabase.functions.invoke('sync-subscription');
-      debugLog('Sync result:', { syncData, syncError });
-
-      // Fetch subscription data to update state
-      debugLog('Fetching subscription from DB...');
-      await fetchSubscription();
-      debugLog('Subscription fetched, state should be updated');
-
-      // Show success toast based on actual sync result
-      if (syncData?.restored) {
-        const details = syncData.details;
-        const planText = details?.plan === '6months' ? '6-Monate Paket' : 'Premium Abo';
-        debugLog('SUCCESS: Subscription restored', { planText, details });
-
-        // Track subscription activated
-        trackEvent('subscription_activated', {
-          plan: details?.plan,
-          price: 9,
-          source: 'checkout'
-        });
-
-        toast.success(`${planText} erfolgreich aktiviert!\n\nDu hast jetzt vollen Zugang zu allen Inhalten.`, '🎉 Willkommen bei 34a Master Premium!');
-        setLoading(false);
-      } else {
-        // Webhook might still be processing - show optimistic message but trigger background polling
-        debugLog('Sync did not return restored, starting polling...');
-        toast.info('Zahlung wird verarbeitet...', '⏳ Bitte warten');
-
-        // Poll a few times in case webhook is slightly delayed
-        let attempts = 0;
-        const maxAttempts = 10;
-        const interval = setInterval(async () => {
-          attempts++;
-          debugLog(`Poll attempt ${attempts}/${maxAttempts}`);
-
-          // Try sync again
-          const { data: pollSyncData } = await supabase.functions.invoke('sync-subscription');
-          debugLog('Poll sync result:', pollSyncData);
-
-          await fetchSubscription();
-
-          if (pollSyncData?.restored) {
-            debugLog('SUCCESS via polling!');
-            const details = pollSyncData.details;
-            const planText = details?.plan === '6months' ? '6-Monate Paket' : 'Premium Abo';
-            toast.success(`${planText} erfolgreich aktiviert!`, '🎉 Premium freigeschaltet!');
-            clearInterval(interval);
-            setLoading(false);
-          } else if (attempts >= maxAttempts) {
-            debugLog('Max attempts reached, stopping poll');
-            toast.warning('Falls dein Abo nicht erscheint, klicke bitte auf "Käufe wiederherstellen".', 'Zahlung wird verarbeitet');
-            clearInterval(interval);
-            setLoading(false);
-          }
-        }, 2000);
-      }
-
-    } catch (err) {
-      console.error('Error in processPaymentSuccess:', err);
-      toast.error('Fehler beim Laden des Abos. Bitte "Käufe wiederherstellen" klicken.', 'Zahlung wurde verarbeitet');
-      setLoading(false);
     }
   };
 
@@ -680,7 +591,6 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       restorePurchases,
       manageSubscription,
       openCheckout,
-      processPaymentSuccess,
       markTransitionNotice,
       transitionNoticeReplayNonce
     }}>
