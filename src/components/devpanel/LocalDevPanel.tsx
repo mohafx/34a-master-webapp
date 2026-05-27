@@ -1,4 +1,4 @@
-import { Bug, Crown, LogIn, LogOut, RefreshCw, Rocket, Sparkles, Timer, X } from 'lucide-react';
+import { Bug, CheckCircle2, Crown, LogIn, LogOut, RefreshCw, Rocket, Sparkles, Timer, X } from 'lucide-react';
 import { useDevPanel, type DevAccountState, type DevShortcutId, type DevTransitionState } from '../../devpanel/DevPanelContext';
 
 const stateButtons: Array<{
@@ -48,6 +48,12 @@ export function LocalDevPanel() {
   } = useDevPanel();
 
   if (!enabled) return null;
+
+  const simulateSuccessfulPayment = () => {
+    setOverrideState('premium');
+    window.location.hash = '#/payment-success?dev_payment=success&session_id=cs_dev_success';
+    setPanelOpen(false);
+  };
 
   return (
     <>
@@ -147,6 +153,18 @@ export function LocalDevPanel() {
           </div>
 
           <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+              Zahlung testen
+            </p>
+            <button
+              type="button"
+              onClick={simulateSuccessfulPayment}
+              className="mb-4 inline-flex w-full items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-100 dark:hover:bg-emerald-900/30"
+            >
+              <span>Zahlung erfolgreich simulieren</span>
+              <CheckCircle2 size={16} />
+            </button>
+
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
               Shortcuts
             </p>

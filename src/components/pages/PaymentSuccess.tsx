@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowRight, CheckCircle, Loader2, Mail, ShieldCheck } fr
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSubscription } from '../../contexts/SubscriptionContext';
+import { isLocalhostDev } from '../../utils/isLocalhostDev';
 
 type VerificationState = 'checking' | 'success' | 'pending' | 'failed';
 
@@ -23,10 +24,24 @@ export default function PaymentSuccess() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const sessionId = searchParams.get('session_id');
+    const isDevPaymentSuccess = isLocalhostDev() && searchParams.get('dev_payment') === 'success';
     const { user } = useAuth();
     const { refreshSubscription } = useSubscription();
-    const [state, setState] = useState<VerificationState>(sessionId ? 'checking' : 'failed');
-    const [details, setDetails] = useState<VerifyCheckoutResponse | null>(null);
+    const [state, setState] = useState<VerificationState>(isDevPaymentSuccess ? 'success' : sessionId ? 'checking' : 'failed');
+    const [details, setDetails] = useState<VerifyCheckoutResponse | null>(
+        isDevPaymentSuccess
+            ? {
+                isSuccess: true,
+                isPremium: true,
+                sessionStatus: 'complete',
+                paymentStatus: 'paid',
+                checkoutMode: 'authenticated',
+                isGuest: false,
+                email: 'premium@localhost.dev',
+                plan: '6months',
+            }
+            : null,
+    );
     const hasRefreshedSubscriptionRef = useRef(false);
     const refreshSubscriptionRef = useRef(refreshSubscription);
 
@@ -39,6 +54,11 @@ export default function PaymentSuccess() {
         let timeout: ReturnType<typeof setTimeout> | null = null;
 
         async function verify(attempt = 1) {
+            if (isDevPaymentSuccess) {
+                setState('success');
+                return;
+            }
+
             if (!sessionId) {
                 setState('failed');
                 return;
@@ -85,7 +105,7 @@ export default function PaymentSuccess() {
             cancelled = true;
             if (timeout) clearTimeout(timeout);
         };
-    }, [sessionId, user?.id]);
+    }, [isDevPaymentSuccess, sessionId, user?.id]);
 
     const isGuest = details?.isGuest || details?.checkoutMode === 'guest' || (!user && state === 'success');
     const email = details?.email;
