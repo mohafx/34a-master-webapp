@@ -12,11 +12,109 @@ const corsHeaders = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+
 const supabaseAdmin = createClient(
-    Deno.env.get("SUPABASE_URL") ?? "",
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    supabaseUrl,
+    supabaseServiceRoleKey,
     { auth: { autoRefreshToken: false, persistSession: false } }
 );
+
+const supabaseAuthClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+});
+
+function getStripeId(value: string | { id?: string } | null | undefined): string {
+    if (!value) return "";
+    return typeof value === "string" ? value : value.id || "";
+}
+
+function getUserEmail(session: Stripe.Checkout.Session): string | null {
+    return session.customer_details?.email || session.customer_email || session.metadata?.guest_email || null;
+}
+
+function normalizePlan(planType: string | undefined | null): string {
+    return planType && planType !== "monthly" ? planType : "6months";
+}
+
+async function upsertSubscription({
+    userId,
+    userEmail,
+    subscriptionId,
+    customerId,
+    status,
+    plan,
+    currentPeriodEnd,
+}: {
+    userId: string;
+    userEmail: string | null;
+    subscriptionId: string;
+    customerId: string;
+    status: string;
+    plan: string;
+    currentPeriodEnd: Date;
+}) {
+    const { data: existing, error: findError } = await supabaseAdmin
+        .from('subscriptions')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (findError) {
+        throw findError;
+    }
+
+    const payload = {
+        status,
+        plan,
+        provider: 'stripe',
+        provider_customer_id: customerId || 'unknown',
+        provider_subscription_id: subscriptionId,
+        user_email: userEmail,
+        current_period_end: currentPeriodEnd.toISOString(),
+        updated_at: new Date().toISOString(),
+    };
+
+    if (existing) {
+        const { error } = await supabaseAdmin
+            .from('subscriptions')
+            .update(payload)
+            .eq('id', existing.id);
+        if (error) throw error;
+        console.log(`[verify-checkout] Updated subscription for user ${userId}: ${status}`);
+        return;
+    }
+
+    const { error } = await supabaseAdmin
+        .from('subscriptions')
+        .insert({
+            user_id: userId,
+            ...payload,
+        });
+    if (error) throw error;
+    console.log(`[verify-checkout] Inserted subscription for user ${userId}: ${status}`);
+}
+
+async function sendGuestRegistrationEmail(email: string): Promise<void> {
+    if (!supabaseUrl || !supabaseAnonKey) {
+        console.error("[verify-checkout] Cannot send recovery email: missing SUPABASE_URL or SUPABASE_ANON_KEY");
+        return;
+    }
+
+    const siteUrl = Deno.env.get("SITE_URL") || "https://34a-master.app";
+    const { error } = await supabaseAuthClient.auth.resetPasswordForEmail(email, {
+        redirectTo: `${siteUrl}/#/complete-registration`,
+    });
+
+    if (error) {
+        console.error(`[verify-checkout] Failed to send recovery email to ${email}:`, error);
+        return;
+    }
+
+    console.log(`[verify-checkout] Recovery email sent to ${email} for guest checkout`);
+}
 
 async function activateTikTokLernplan(tiktokLernplanId: string | undefined, userId: string | undefined): Promise<void> {
     if (!tiktokLernplanId || !userId) return;
@@ -88,6 +186,47 @@ serve(async (req) => {
             const userId = session.client_reference_id || session.metadata?.user_id;
             const checkoutMode = session.metadata?.guest_checkout === "true" ? "guest" : "authenticated";
             const paidAt = new Date((session.created || Math.floor(Date.now() / 1000)) * 1000).toISOString();
+            const userEmail = getUserEmail(session);
+
+            if (userId) {
+                if (session.mode === 'payment') {
+                    const currentPeriodEnd = new Date((session.created || Math.floor(Date.now() / 1000)) * 1000);
+                    currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 6);
+
+                    await upsertSubscription({
+                        userId,
+                        userEmail,
+                        subscriptionId: `session_${session.id}`,
+                        customerId: getStripeId(session.customer),
+                        status: 'active',
+                        plan: normalizePlan(session.metadata?.plan_type),
+                        currentPeriodEnd,
+                    });
+                } else if (session.mode === 'subscription' && session.subscription) {
+                    const subscription = typeof session.subscription === 'string'
+                        ? await stripe.subscriptions.retrieve(session.subscription)
+                        : session.subscription;
+                    const effectiveStatus = subscription.cancel_at_period_end && subscription.status === 'active'
+                        ? 'canceled'
+                        : subscription.status;
+
+                    await upsertSubscription({
+                        userId,
+                        userEmail,
+                        subscriptionId: subscription.id,
+                        customerId: getStripeId(subscription.customer),
+                        status: effectiveStatus,
+                        plan: session.metadata?.plan_type || subscription.metadata?.plan_type || 'monthly',
+                        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+                    });
+                }
+
+                if (session.metadata?.guest_checkout === 'true' && userEmail) {
+                    await sendGuestRegistrationEmail(userEmail);
+                }
+            } else {
+                console.error(`[verify-checkout] Successful session ${session.id} has no user_id`);
+            }
 
             await identifyPostHogUser(userId, session.metadata?.session_funnel_id, {
                 source: "verify_checkout",

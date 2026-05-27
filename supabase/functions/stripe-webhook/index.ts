@@ -11,9 +11,13 @@ const endpointSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
 // Use Service Role to bypass RLS when updating subscriptions
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+const supabaseAuthClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+});
 
 // =====================================================
 // IDEMPOTENCY: Check if event was already processed
@@ -71,6 +75,25 @@ async function activateTikTokLernplan(tiktokLernplanId: string | undefined, user
         weak_topic_count: Array.isArray(data?.weak_topics) ? data.weak_topics.length : 0,
     });
     console.log(`[webhook] TikTok Lernplan activated: ${tiktokLernplanId}`);
+}
+
+async function sendGuestRegistrationEmail(email: string): Promise<void> {
+    if (!supabaseUrl || !supabaseAnonKey) {
+        console.error("[webhook] Cannot send guest registration email: missing SUPABASE_URL or SUPABASE_ANON_KEY");
+        return;
+    }
+
+    const siteUrl = Deno.env.get("SITE_URL") || "https://34a-master.app";
+    const { error } = await supabaseAuthClient.auth.resetPasswordForEmail(email, {
+        redirectTo: `${siteUrl}/#/complete-registration`,
+    });
+
+    if (error) {
+        console.error(`[webhook] Failed to send recovery email to ${email}:`, error);
+        return;
+    }
+
+    console.log(`[webhook] Recovery email sent to ${email} for guest checkout`);
 }
 
 // =====================================================
@@ -396,19 +419,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         // Send recovery email for guest checkout users so they can set a password
         if (session.metadata?.guest_checkout === 'true' && session.customer_email) {
             try {
-                const siteUrl = Deno.env.get("SITE_URL") || "https://34a-master.app";
-                const { error: recoveryError } = await supabaseAdmin.auth.admin.generateLink({
-                    type: 'recovery',
-                    email: session.customer_email,
-                    options: {
-                        redirectTo: `${siteUrl}/#/complete-registration`,
-                    }
-                });
-                if (recoveryError) {
-                    console.error(`[webhook] Failed to send recovery email to ${session.customer_email}:`, recoveryError);
-                } else {
-                    console.log(`[webhook] Recovery email sent to ${session.customer_email} for guest checkout`);
-                }
+                await sendGuestRegistrationEmail(session.customer_email);
             } catch (emailErr: any) {
                 // Non-fatal — payment was still successful
                 console.error(`[webhook] Error sending recovery email:`, emailErr?.message);

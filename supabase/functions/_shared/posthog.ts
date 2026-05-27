@@ -22,8 +22,8 @@ export async function capturePostHogEvent(
   event: string,
   options: CapturePostHogOptions = {},
 ): Promise<void> {
-  const apiKey = Deno.env.get("POSTHOG_PROJECT_API_KEY");
-  const host = (Deno.env.get("POSTHOG_HOST") || DEFAULT_POSTHOG_HOST).replace(/\/$/, "");
+  const apiKey = Deno.env.get("POSTHOG_PROJECT_API_KEY") || Deno.env.get("VITE_POSTHOG_KEY");
+  const host = (Deno.env.get("POSTHOG_HOST") || Deno.env.get("VITE_POSTHOG_HOST") || DEFAULT_POSTHOG_HOST).replace(/\/$/, "");
 
   if (!apiKey) {
     console.warn(`[posthog] Skipping ${event}: POSTHOG_PROJECT_API_KEY is not configured`);

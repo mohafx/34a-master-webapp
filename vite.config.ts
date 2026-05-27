@@ -34,6 +34,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       host: '127.0.0.1',
       port: process.env.PORT ? parseInt(process.env.PORT) : 3000,
+      allowedHosts: ['.loca.lt'],
       // PostHog Reverse Proxy: umgeht Ad-Blocker in der Entwicklung
       proxy: {
         '/ingest': {

@@ -64,6 +64,34 @@ async function createPendingTikTokLernplan(
     return data?.id || null;
 }
 
+async function findExistingUserByEmail(email: string) {
+    const normalizedEmail = email.toLowerCase();
+
+    for (let page = 1; ; page += 1) {
+        const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) {
+            console.error("[guest-checkout] Error checking existing users:", error);
+            throw new Error("Benutzer konnte nicht geprüft werden.");
+        }
+
+        const existingUser = data?.users?.find(
+            (user) => user.email?.toLowerCase() === normalizedEmail,
+        );
+        if (existingUser) return existingUser;
+        if (!data?.users || data.users.length < 1000) return null;
+    }
+}
+
+function emailExistsResponse() {
+    return new Response(
+        JSON.stringify({
+            error: "EMAIL_EXISTS",
+            message: "Diese E-Mail hat bereits ein Konto. Bitte melde dich an.",
+        }),
+        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+}
+
 serve(async (req) => {
     if (req.method === "OPTIONS") {
         return new Response(null, { headers: corsHeaders });
@@ -90,7 +118,7 @@ serve(async (req) => {
 
         // --- Map price ID ---
         const PRICE_MAPPING: Record<string, string> = {
-            "6months": Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1TWCSo4CFd3pD2h0xAdNn66L",
+            "6months": Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1TbfqT4CFd3pD2h0X24JYhT6",
         };
 
         const stripePriceId = PRICE_MAPPING[priceId];
@@ -102,20 +130,8 @@ serve(async (req) => {
         }
 
         // --- Check if email already has an account ---
-        const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
-        const existingUser = existingUsers?.users?.find(
-            (u) => u.email?.toLowerCase() === email.toLowerCase()
-        );
-
-        if (existingUser) {
-            return new Response(
-                JSON.stringify({
-                    error: "EMAIL_EXISTS",
-                    message: "Diese E-Mail hat bereits ein Konto. Bitte melde dich an."
-                }),
-                { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-        }
+        const existingUser = await findExistingUserByEmail(email);
+        if (existingUser) return emailExistsResponse();
 
         // --- Create Supabase user (no password, auto-confirmed) ---
         const displayName = email.split("@")[0];
@@ -130,6 +146,9 @@ serve(async (req) => {
 
         if (createError || !newUserData?.user) {
             console.error("[guest-checkout] Error creating user:", createError);
+            if (createError?.message?.toLowerCase().includes("already") || createError?.message?.toLowerCase().includes("registered")) {
+                return emailExistsResponse();
+            }
             throw new Error(createError?.message || "Benutzer konnte nicht erstellt werden.");
         }
 

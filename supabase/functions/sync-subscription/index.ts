@@ -184,9 +184,9 @@ serve(async (req) => {
                     continue;
                 }
 
-                // Check logic for 6-months validity
-                // We assume 6 months duration for one-time payments
-                if (session.metadata?.plan_type === '6months' || session.amount_total === 900) { // Check amount as fallback (9 EUR)
+                // Check logic for 6-months validity.
+                // Metadata is authoritative; amount fallback keeps legacy 9 EUR and current 19 EUR purchases restorable.
+                if (session.metadata?.plan_type === '6months' || session.amount_total === 900 || session.amount_total === 1900) {
 
                     const created = new Date(session.created * 1000);
                     const expiresAt = new Date(created);

@@ -123,6 +123,17 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
     const showArabic = language === 'DE_AR';
     const forceLightMode = featureName === 'tiktok_onboarding_result';
     const isTikTokPaywall = featureName === 'tiktok_onboarding_result';
+
+    const switchToExistingAccountLogin = (email: string) => {
+        setLoginEmail(email);
+        setGuestMode('login');
+        setGuestError('Diese E-Mail hat bereits ein Konto. Bitte melde dich an.');
+        if (isTikTokPaywall) {
+            trackTikTokPaywallEvent('tiktok_existing_account_login_prompted', {
+                email_domain: getEmailDomain(email),
+            });
+        }
+    };
     const tiktokAnalytics = (tiktokPlanPayload as any)?.analytics || {};
     const getTikTokPaywallContext = (extra: Record<string, any> = {}) => getTikTokAnalyticsContext('paywall', language, {
         source: 'tiktok_result',
@@ -274,18 +285,25 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                 }
             });
 
-            if (fnError) throw new Error(fnError.message);
+            if (fnError) {
+                let errorPayload: any = null;
+                const response = (fnError as any).context;
+                if (response?.clone) {
+                    try {
+                        errorPayload = await response.clone().json();
+                    } catch {
+                        errorPayload = null;
+                    }
+                }
+                if (errorPayload?.error === 'EMAIL_EXISTS') {
+                    switchToExistingAccountLogin(guestEmail);
+                    return;
+                }
+                throw new Error(errorPayload?.message || fnError.message);
+            }
 
             if (data?.error === 'EMAIL_EXISTS') {
-                // Switch to inline login
-                setLoginEmail(guestEmail);
-                setGuestMode('login');
-                setGuestError('Diese E-Mail hat bereits ein Konto. Bitte melde dich an.');
-                if (isTikTokPaywall) {
-                    trackTikTokPaywallEvent('tiktok_existing_account_login_prompted', {
-                        email_domain: getEmailDomain(guestEmail),
-                    });
-                }
+                switchToExistingAccountLogin(guestEmail);
                 return;
             }
             if (data?.error) throw new Error(data.message || data.error);
@@ -362,7 +380,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
 
         trackEvent('upgrade_clicked', {
             plan: selectedPlan,
-            price: 9,
+            price: 19,
             source: isEmbedded ? 'onboarding' : 'paywall_dialog'
         });
         if (isTikTokPaywall) {
@@ -646,7 +664,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                     <div className="p-5 flex items-center justify-between dark:bg-slate-900">
                                         <div className="flex flex-col gap-2">
                                             <div className="flex items-baseline gap-2">
-                                                <span className="font-black text-[18px] dark:text-white">€9</span>
+                                                <span className="font-black text-[18px] dark:text-white">€19</span>
                                                 <span className="font-bold text-[10px] text-slate-400 dark:text-slate-400">statt <span className="line-through">€49</span></span>
                                             </div>
                                             <p className="font-black text-[10px] uppercase tracking-tight dark:text-slate-200">Einmalzahlung für 6 Monate</p>

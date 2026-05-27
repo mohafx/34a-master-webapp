@@ -11,6 +11,13 @@ interface EmbeddedPaymentProps {
     trackingContext?: AnalyticsEventProperties;
 }
 
+const isInsecureLanOrigin = () => {
+    if (typeof window === 'undefined') return false;
+    const { protocol, hostname } = window.location;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+    return protocol !== 'https:' && !isLocalhost;
+};
+
 export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: EmbeddedPaymentProps) => {
     const { trackEvent } = usePostHog();
     const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
@@ -88,7 +95,11 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
             promise.then((stripe) => {
                 if (!stripe) {
                     if (isMountedRef.current) {
-                        setError("Stripe konnte nicht geladen werden.");
+                        setError(
+                            isInsecureLanOrigin()
+                                ? "Stripe braucht für den Handy-Test eine HTTPS-Adresse."
+                                : "Stripe konnte nicht geladen werden."
+                        );
                     }
                     const currentTrackingContext = trackingContextRef.current;
                     if (currentTrackingContext) {
@@ -107,7 +118,11 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
             }).catch((err) => {
                 console.error("Stripe load error:", err);
                 if (isMountedRef.current) {
-                    setError("Stripe konnte nicht geladen werden.");
+                    setError(
+                        isInsecureLanOrigin()
+                            ? "Stripe braucht für den Handy-Test eine HTTPS-Adresse."
+                            : "Stripe konnte nicht geladen werden."
+                    );
                     setLoading(false);
                 }
                 const currentTrackingContext = trackingContextRef.current;
@@ -125,7 +140,11 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
         } catch (err) {
             console.error("Stripe init error:", err);
             if (isMountedRef.current) {
-                setError("Stripe konnte nicht initialisiert werden.");
+                setError(
+                    isInsecureLanOrigin()
+                        ? "Stripe braucht für den Handy-Test eine HTTPS-Adresse."
+                        : "Stripe konnte nicht initialisiert werden."
+                );
                 setLoading(false);
             }
             const currentTrackingContext = trackingContextRef.current;
@@ -310,7 +329,11 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
             .catch((err) => {
                 console.error("Stripe embedded checkout error:", err);
                 if (!cancelled && isMountedRef.current) {
-                    setError("Stripe konnte nicht geladen werden.");
+                    setError(
+                        isInsecureLanOrigin()
+                            ? "Stripe braucht für den Handy-Test eine HTTPS-Adresse."
+                            : "Stripe konnte nicht geladen werden."
+                    );
                     const currentTrackingContext = trackingContextRef.current;
                     if (currentTrackingContext) {
                         const context = {
@@ -350,6 +373,7 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
     }, [clientSecret, error, handleStripeComplete, loading, stripePromise, trackEvent]);
 
     if (error) {
+        const insecureLanOrigin = isInsecureLanOrigin();
         return (
             <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
                 <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-4">
@@ -357,7 +381,9 @@ export const EmbeddedPayment = ({ clientSecret, onComplete, trackingContext }: E
                 </div>
                 <p className="text-red-600 dark:text-red-400 font-medium mb-2">{error}</p>
                 <p className="text-sm text-slate-500">
-                    Bitte versuche es später erneut oder kontaktiere uns über WhatsApp.
+                    {insecureLanOrigin
+                        ? "Öffne die App über eine HTTPS-Preview oder einen HTTPS-Tunnel. Desktop-Tests über localhost funktionieren weiterhin."
+                        : "Bitte versuche es später erneut oder kontaktiere uns über WhatsApp."}
                 </p>
             </div>
         );
