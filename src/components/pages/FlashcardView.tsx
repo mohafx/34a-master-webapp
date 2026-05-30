@@ -222,16 +222,18 @@ export default function FlashcardView() {
                                 </button>
                             )}
 
-                            <div className="flex-1 flex flex-col justify-center overflow-y-auto w-full custom-scrollbar px-10 py-4">
-                                <h2 className="text-xl font-black text-slate-900 dark:text-white leading-tight mb-4">
-                                    {currentCard.question_de}
-                                </h2>
+                            <div className="flex-1 flex flex-col overflow-y-auto w-full custom-scrollbar px-10 py-4">
+                                <div className="my-auto w-full">
+                                    <h2 className="text-xl font-black text-slate-900 dark:text-white leading-tight mb-4">
+                                        {currentCard.question_de}
+                                    </h2>
 
-                                {language === 'DE_AR' && currentCard.question_ar && (
-                                    <p className="text-lg text-slate-500 dark:text-slate-400 leading-relaxed" dir="rtl">
-                                        {currentCard.question_ar}
-                                    </p>
-                                )}
+                                    {language === 'DE_AR' && currentCard.question_ar && (
+                                        <p className="text-lg text-slate-500 dark:text-slate-400 leading-relaxed" dir="rtl">
+                                            {currentCard.question_ar}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
 
                             <p className="absolute bottom-8 text-sm font-medium text-blue-500 animate-pulse">
@@ -262,7 +264,7 @@ export default function FlashcardView() {
                                     </button>
                                 )}
 
-                                <div className="flex-1 flex flex-col justify-center overflow-y-auto w-full custom-scrollbar pr-12">
+                                <div className="flex-1 flex flex-col overflow-y-auto w-full custom-scrollbar pr-12">
                                     {(() => {
                                         // Remove bookmark-like emojis that may appear on iOS Safari
                                         const cleanText = (text: string) => {
@@ -327,7 +329,7 @@ export default function FlashcardView() {
                                         };
 
                                         return (
-                                            <div className="space-y-6">
+                                            <div className="my-auto space-y-6 py-4 w-full">
                                                 <div className="space-y-4">
                                                     {renderContent(currentCard.answer_de, false)}
                                                 </div>

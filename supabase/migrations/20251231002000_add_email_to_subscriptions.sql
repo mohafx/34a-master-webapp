@@ -1,7 +1,5 @@
-
 ALTER TABLE public.subscriptions
 ADD COLUMN IF NOT EXISTS user_email TEXT;
-
 -- Backfill emails from auth.users (requires permissions, usually db push runs as postgres/admin)
 DO $$
 BEGIN

@@ -82,4 +82,4 @@ CREATE TABLE IF NOT EXISTS public.question_explanation_audit (
 );
 
 CREATE INDEX IF NOT EXISTS idx_question_explanation_audit_run_written
-  ON public.question_explanation_audit(run_id, written_at);
+  ON public.question_explanation_audit(run_id, written_at);;
