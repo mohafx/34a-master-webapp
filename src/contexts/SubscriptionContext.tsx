@@ -357,7 +357,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         throw new Error('No client secret returned from server');
       }
 
-      trackEvent('checkout_started', { plan: plan, price: 19, has_tiktok_plan: Boolean(options.tiktokPlanPayload) });
+      trackEvent('checkout_started', { plan: plan, price: 39, has_tiktok_plan: Boolean(options.tiktokPlanPayload) });
 
       console.log('Got clientSecret, length:', data.clientSecret?.length);
       return data.clientSecret;

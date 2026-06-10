@@ -419,7 +419,7 @@ export default function TikTokTestResult() {
                                 </div>
 
                                 <p className="pt-4 text-center text-[12px] font-black text-slate-500">
-                                    Einmalig 19€ · 6 Monate Zugriff · kein Abo
+                                    Einmalig 39 € · 6 Monate Zugriff · kein Abo
                                 </p>
 
                                 <div className="pt-3 flex justify-center">

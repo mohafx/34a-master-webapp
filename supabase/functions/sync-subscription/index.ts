@@ -185,8 +185,8 @@ serve(async (req) => {
                 }
 
                 // Check logic for 6-months validity.
-                // Metadata is authoritative; amount fallback keeps legacy 9 EUR and current 19 EUR purchases restorable.
-                if (session.metadata?.plan_type === '6months' || session.amount_total === 900 || session.amount_total === 1900) {
+                // Metadata is authoritative; amount fallback keeps legacy 9 EUR, 19 EUR, and 39 EUR purchases restorable.
+                if (session.metadata?.plan_type === '6months' || session.amount_total === 900 || session.amount_total === 1900 || session.amount_total === 3900) {
 
                     const created = new Date(session.created * 1000);
                     const expiresAt = new Date(created);

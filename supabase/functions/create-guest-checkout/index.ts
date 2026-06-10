@@ -118,7 +118,7 @@ serve(async (req) => {
 
         // --- Map price ID ---
         const PRICE_MAPPING: Record<string, string> = {
-            "6months": Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1TbfqT4CFd3pD2h0X24JYhT6",
+            "6months": Deno.env.get("STRIPE_PRICE_6MONTHS_ID") || "price_1TgZZ44CFd3pD2h0sPHSQQxn",
         };
 
         const stripePriceId = PRICE_MAPPING[priceId];

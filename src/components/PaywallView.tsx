@@ -6,7 +6,7 @@ import { usePostHog } from '../contexts/PostHogProvider';
 import { supabase } from '../lib/supabase';
 import { getEmailDomain, getTikTokAnalyticsContext, trackTikTokServerEvent } from '../utils/tiktokAnalytics';
 import { trackServerEvent } from '../services/serverAnalytics';
-import { X, Crown, Check, MessageCircle, Lightbulb, Infinity, ShieldCheck, Rocket, Languages, ChevronDown, Users, BookOpen, Timer, Blocks, Calendar, Mic, Sparkles, Pencil, GraduationCap, Layers, Target, Trophy, Mail, LogIn, Eye, EyeOff } from 'lucide-react';
+import { X, Crown, Check, MessageCircle, Lightbulb, Infinity, ShieldCheck, Rocket, Languages, ChevronDown, Users, BookOpen, Timer, Blocks, Calendar, Sparkles, Pencil, GraduationCap, Layers, Target, Trophy, Mail, LogIn, Eye, EyeOff, UserRound } from 'lucide-react';
 import { EmbeddedPayment } from './EmbeddedPayment';
 import { TransitionAccessNotice } from './TransitionAccessNotice';
 
@@ -396,7 +396,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
 
         trackEvent('upgrade_clicked', {
             plan: selectedPlan,
-            price: 19,
+            price: 39,
             source: isEmbedded ? 'onboarding' : 'paywall_dialog'
         });
         if (isTikTokPaywall) {
@@ -674,8 +674,8 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                     <div className="p-5 flex items-center justify-between dark:bg-slate-900">
                                         <div className="flex flex-col gap-2">
                                             <div className="flex items-baseline gap-2">
-                                                <span className="font-black text-[18px] dark:text-white">€19</span>
-                                                <span className="font-bold text-[10px] text-slate-400 dark:text-slate-400">statt <span className="line-through">€49</span></span>
+                                                <span className="font-black text-[18px] dark:text-white">39 €</span>
+                                                <span className="font-bold text-[10px] text-slate-400 dark:text-slate-400">statt <span className="line-through">89 €</span></span>
                                             </div>
                                             <p className="font-black text-[10px] uppercase tracking-tight dark:text-slate-200">Einmalzahlung für 6 Monate</p>
                                         </div>
@@ -725,27 +725,25 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                     </div>
                                 )}
 
-                                 {/* Premium Summary above CTA */}
+                                 {/* Trust badge above CTA */}
                                 <div className="flex flex-col items-center gap-1 mb-6 animate-fadeIn">
-                                    <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1.5 text-[12px] sm:text-[13px] font-extrabold text-slate-700 dark:text-slate-200 bg-white/50 dark:bg-slate-900/80 px-4 py-2 rounded-2xl border border-slate-200/50 dark:border-slate-700">
-                                        <div className="flex items-center gap-1.5">
-                                            <BookOpen size={14} className="text-blue-500" />
-                                            <span>136 Lektionen</span>
+                                    <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1.5 text-[12px] sm:text-[13px] font-extrabold text-slate-700 dark:text-slate-200 bg-white/50 dark:bg-slate-900/80 px-4 py-2 rounded-2xl">
+                                        <div className="flex -space-x-2">
+                                            {['from-blue-500 to-indigo-500', 'from-emerald-500 to-teal-500', 'from-amber-400 to-orange-500'].map((gradient, index) => (
+                                                <span
+                                                    key={gradient}
+                                                    className={`flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br ${gradient} ring-2 ring-white dark:ring-slate-900`}
+                                                    style={{ zIndex: 3 - index }}
+                                                >
+                                                    <UserRound size={13} className="text-white" strokeWidth={2.6} />
+                                                </span>
+                                            ))}
                                         </div>
-                                        <div className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600 hidden sm:block" />
-                                        <div className="flex items-center gap-1.5">
-                                            <Target size={14} className="text-blue-500" />
-                                            <span>701 Testfragen</span>
-                                        </div>
-                                        <div className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600 hidden sm:block" />
-                                        <div className="flex items-center gap-1.5">
-                                            <Mic size={14} className="text-blue-500" />
-                                            <span>150+ Mündliche Fragen</span>
-                                        </div>
+                                        <span className="text-center leading-tight">Vertraut durch +1.000 Schüler</span>
                                     </div>
                                     {showArabic && (
                                         <p className="text-[10px] text-slate-400 dark:text-slate-500 font-bold mt-0.5" dir="rtl">
-                                            136 درس • 701 سؤال • 150+ سؤال شفهي
+                                            يثق بنا أكثر من 1.000 طالب
                                         </p>
                                     )}
                                 </div>
