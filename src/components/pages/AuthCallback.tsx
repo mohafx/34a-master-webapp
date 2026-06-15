@@ -1,58 +1,83 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import type { Session } from '@supabase/supabase-js';
 import { trackOAuthLoginOnce } from '../../services/serverAnalytics';
 
 export default function AuthCallback() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        // Handle the OAuth callback
-        const handleCallback = async () => {
-            try {
-                const hashQuery = window.location.hash.includes('?')
-                    ? window.location.hash.split('?')[1]
-                    : '';
-                const hashParams = new URLSearchParams(hashQuery);
-                const urlParams = new URLSearchParams(window.location.search);
-                const authCode = hashParams.get('code') || urlParams.get('code');
+        let finished = false;
 
-                if (authCode) {
-                    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(authCode);
-                    if (exchangeError) {
-                        throw exchangeError;
-                    }
-                }
-
-                const { data: { session }, error } = await supabase.auth.getSession();
-
-                if (error) {
-                    console.error('OAuth callback error:', error);
-                    // Redirect to home with error
-                    navigate('/?auth=error');
-                    return;
-                }
-
-                if (session) {
-                    console.log('OAuth successful, user logged in');
-                    trackOAuthLoginOnce(session.user.id, {
-                        email: session.user.email,
-                        method: session.user.app_metadata?.provider || 'google',
-                        source: 'oauth_callback',
-                    });
-                    // Redirect to dashboard on success
-                    navigate('/dashboard');
-                } else {
-                    // No session found, redirect to home
-                    navigate('/');
-                }
-            } catch (err) {
-                console.error('Unexpected error during OAuth callback:', err);
+        const finish = (session: Session | null) => {
+            if (finished) return;
+            finished = true;
+            if (session) {
+                console.log('OAuth successful, user logged in');
+                trackOAuthLoginOnce(session.user.id, {
+                    email: session.user.email,
+                    method: session.user.app_metadata?.provider || 'google',
+                    source: 'oauth_callback',
+                });
+                navigate('/dashboard');
+            } else {
                 navigate('/?auth=error');
             }
         };
 
-        handleCallback();
+        // The client is configured with `detectSessionInUrl: true`. For a PKCE
+        // code that lands in `window.location.search` (the usual case: GoTrue
+        // appends `?code=` *before* the `#` of our HashRouter redirect, so the
+        // URL becomes `https://app/?code=...#/auth/callback`), the client
+        // already exchanges it automatically at startup. Calling
+        // exchangeCodeForSession again here would fail — a PKCE code is
+        // single-use — and wrongly bounce the user to the error page.
+        //
+        // So: listen for the session that detectSessionInUrl establishes, and
+        // only manually exchange a code that lives in the URL *hash*, which
+        // detectSessionInUrl cannot see.
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (session) finish(session);
+        });
+
+        const run = async () => {
+            // 1. Maybe detectSessionInUrl already established the session.
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) return finish(session);
+
+            // 2. A code in the hash (e.g. `#/auth/callback?code=...`) is NOT seen
+            //    by detectSessionInUrl — exchange it ourselves.
+            const hashQuery = window.location.hash.includes('?')
+                ? window.location.hash.split('?')[1]
+                : '';
+            const hashCode = new URLSearchParams(hashQuery).get('code');
+            if (hashCode) {
+                try {
+                    const { data, error } = await supabase.auth.exchangeCodeForSession(hashCode);
+                    if (!error && data.session) return finish(data.session);
+                } catch (err) {
+                    console.warn('Manual code exchange failed (likely already handled):', err);
+                }
+            }
+            // 3. Otherwise wait: detectSessionInUrl may still be in flight; the
+            //    onAuthStateChange listener or the timeout fallback resolves it.
+        };
+
+        run();
+
+        // Fallback: re-check the session after a short delay. Covers the race
+        // where detectSessionInUrl exchanged the code but the SIGNED_IN event
+        // had already fired before this component mounted.
+        const timer = setTimeout(async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            finish(session);
+        }, 4000);
+
+        return () => {
+            subscription.unsubscribe();
+            clearTimeout(timer);
+        };
     }, [navigate]);
 
     return (

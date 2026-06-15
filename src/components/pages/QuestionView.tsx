@@ -594,6 +594,11 @@ export default function QuestionView() {
     ...rawQuestion,
     ...(localQuestionOverrides[rawQuestion.id] || {})
   } : rawQuestion;
+  const correctAnswerCount = currentQuestion?.answers.filter(answer => answer.isCorrect).length || 0;
+  const selectionLimit = Math.max(correctAnswerCount, 1);
+  const isActualMultipleChoice = selectionLimit > 1;
+  const answerSelectionHint = `Bitte ${selectionLimit} ${selectionLimit === 1 ? 'Antwort' : 'Antworten'} wählen`;
+  const answerSelectionHintAR = selectionLimit === 1 ? 'يرجى اختيار إجابة واحدة' : 'يرجى اختيار إجابتين';
 
   // Initialize reviewedMap when queue loads or reviewed values change (e.g. after background refresh)
   const queueReviewedKey = queue.map(q => `${q.id}:${q.reviewed ? 1 : 0}`).join(',');
@@ -835,14 +840,14 @@ export default function QuestionView() {
   const handleMiniExamSelect = (answerId: string) => {
     const questionId = currentQuestion.id;
 
-    if (currentQuestion.type === QuestionType.SINGLE_CHOICE) {
+    if (!isActualMultipleChoice) {
       setMiniExamAnswers(prev => ({ ...prev, [questionId]: [answerId] }));
     } else {
       setMiniExamAnswers(prev => {
         const current = prev[questionId] || [];
         const updated = current.includes(answerId)
           ? current.filter(id => id !== answerId)
-          : current.length < 2 ? [...current, answerId] : current;
+          : current.length < selectionLimit ? [...current, answerId] : current;
         return { ...prev, [questionId]: updated };
       });
     }
@@ -954,13 +959,13 @@ export default function QuestionView() {
   const handleSelect = (answerId: string) => {
     if (isChecked) return; // Locked
 
-    if (currentQuestion.type === QuestionType.SINGLE_CHOICE) {
+    if (!isActualMultipleChoice) {
       setSelectedAnswers([answerId]);
     } else {
       setSelectedAnswers(prev =>
         prev.includes(answerId)
           ? prev.filter(id => id !== answerId)
-          : prev.length < 2 ? [...prev, answerId] : prev // Limit to 2 for this simulation logic
+          : prev.length < selectionLimit ? [...prev, answerId] : prev
       );
     }
   };
@@ -2161,19 +2166,19 @@ export default function QuestionView() {
                     </div>
 
                     {/* Floating Multi-Choice Badge on Divider Line - Left Aligned */}
-                    {currentQuestion.type === QuestionType.MULTIPLE_CHOICE && (
+                    {isActualMultipleChoice && (
                       <div className="absolute bottom-0 left-6 translate-y-1/2 z-10 flex flex-col items-center text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-900 px-3 py-0.5 rounded-full shadow-sm border border-blue-100 dark:border-blue-800">
                         <div className="flex items-center gap-1.5 whitespace-nowrap">
                           <AlertCircle size={8} strokeWidth={2} />
-                          <span className="text-[7.5px] font-bold uppercase tracking-wider">Bitte 2 Antworten wählen</span>
+                          <span className="text-[7.5px] font-bold uppercase tracking-wider">{answerSelectionHint}</span>
                         </div>
-                        {language === 'DE_AR' && <span className="text-[8px] font-medium mt-0.5" dir="rtl">يرجى اختيار إجابتين</span>}
+                        {language === 'DE_AR' && <span className="text-[8px] font-medium mt-0.5" dir="rtl">{answerSelectionHintAR}</span>}
                       </div>
                     )}
                   </div>
 
                   {/* Answers Section */}
-                  <div className={`flex flex-col gap-1.5 p-3 ${currentQuestion.type === QuestionType.MULTIPLE_CHOICE ? 'pt-5' : ''}`}>
+                  <div className={`flex flex-col gap-1.5 p-3 ${isActualMultipleChoice ? 'pt-5' : ''}`}>
                     {currentQuestion.answers.map((answer) => {
                       const isSelected = isMiniExam
                         ? (miniExamAnswers[currentQuestion.id] || []).includes(answer.id)
