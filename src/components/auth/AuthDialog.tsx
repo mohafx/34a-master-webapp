@@ -173,7 +173,18 @@ export function AuthDialog({ onClose, initialMode = 'register', message }: AuthD
             }
         } catch (err: any) {
             const errorMessage = err.message || 'Unknown error';
-            setError(translateError(errorMessage, showArabic));
+            // Beim Login ist die häufigste reale Ursache für "Invalid login
+            // credentials", dass das Konto via Google erstellt wurde (kein Passwort
+            // gesetzt) ODER die E-Mail vertippt wurde. Supabase kann das
+            // clientseitig nicht unterscheiden, daher geben wir einen Hinweis, der
+            // beide Fälle abdeckt.
+            if (mode === 'login' && /invalid login credentials/i.test(errorMessage)) {
+                const hintDe = 'Ungültige Anmeldedaten.\n\n• Falls du dich mit Google registriert hast, melde dich bitte oben über „Mit Google fortfahren" an (dann gibt es kein Passwort).\n• Prüfe außerdem, ob deine E-Mail-Adresse exakt richtig geschrieben ist.';
+                const hintAr = 'بيانات تسجيل الدخول غير صحيحة.\n\n• إذا سجّلت عبر Google، فاستخدم زر "المتابعة باستخدام Google" بالأعلى (لا توجد كلمة مرور حينها).\n• تأكّد أيضاً من كتابة بريدك الإلكتروني بشكل صحيح تماماً.';
+                setError(showArabic ? `${hintDe}\n${hintAr}` : hintDe);
+            } else {
+                setError(translateError(errorMessage, showArabic));
+            }
         } finally {
             setLoading(false);
         }

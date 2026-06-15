@@ -89,6 +89,19 @@ const AdminWrittenExamBrowser = lazy(() => import('./components/pages/admin/Admi
 const AdminWrittenExamQuestionList = lazy(() => import('./components/pages/admin/AdminWrittenExamQuestionList'));
 const AdminWrittenExamQuiz = lazy(() => import('./components/pages/admin/AdminWrittenExamQuiz'));
 
+// Password-recovery flow detection. On the reset-password route the first-time
+// onboarding must be suppressed: the recovery session looks like a "new login"
+// and would otherwise replace the reset-password page, leaving the user unable to
+// set a new password. (Email confirmation is intentionally NOT included — there
+// the confirmation IS the user's first login, so onboarding should still show.)
+// Reads the live hash (App renders above the Router, so useLocation isn't
+// available here).
+const isAuthFlowRoute = (): boolean => {
+  const hash = window.location.hash || '';
+  return hash.startsWith('#/reset-password')
+    || hash.includes('type=recovery');
+};
+
 // --- Global State ---
 interface AppContextType {
   user: User | null;
@@ -283,11 +296,20 @@ function AppContent() {
     if (isOverrideActive) return;
     const prevUser = prevAuthUserRef.current;
     const isNewLogin = !prevUser && authUser; // transitioned from null → logged-in
-    if (isNewLogin && authUser) {
+    if (isNewLogin && authUser && !isAuthFlowRoute()) {
       const alreadyOnboarded = hasCompletedOnboarding(authUser.id);
       if (!alreadyOnboarded) {
-        // Small delay so the app finishes loading before showing onboarding
-        setTimeout(() => setShowFirstTimeOnboarding(true), 300);
+        // Existing users (data present but flag missing) are auto-marked so the
+        // overlay doesn't reappear on a new device or after localStorage is cleared.
+        const hasExistingData = !!localStorage.getItem('34a_settings')
+          || !!localStorage.getItem('34a_lernplan')
+          || !!localStorage.getItem('34a_exam_date');
+        if (hasExistingData) {
+          markOnboardingCompleted(authUser.id);
+        } else {
+          // Small delay so the app finishes loading before showing onboarding
+          setTimeout(() => setShowFirstTimeOnboarding(true), 300);
+        }
       }
     }
     prevAuthUserRef.current = authUser;
@@ -785,8 +807,12 @@ function AppContent() {
     return <DashboardSkeleton />;
   }
 
-  // Show first-time onboarding BEFORE anything else
-  if (showFirstTimeOnboarding) {
+  // Show first-time onboarding BEFORE anything else — but NEVER on auth-flow
+  // routes (password recovery / email confirmation). Those establish a fresh
+  // session, which looks like a "new login" and would otherwise replace the
+  // reset-password/confirmation page with the onboarding screen, leaving the
+  // user unable to set their new password.
+  if (showFirstTimeOnboarding && !isAuthFlowRoute()) {
     return (
       <FirstTimeOnboarding
         userName={user?.name || 'Gast'}

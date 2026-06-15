@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Lock, CheckCircle, XCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useApp } from '../../App';
+import { parseAuthTokensFromHash } from '../../utils/authHash';
 
 export default function ResetPassword() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { language } = useApp();
   const showArabic = language === 'DE_AR';
@@ -19,25 +19,61 @@ export default function ResetPassword() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    // Check if we have the required tokens in URL
-    const access_token = searchParams.get('access_token');
-    const refresh_token = searchParams.get('refresh_token');
+    let isMounted = true;
 
-    if (!access_token || !refresh_token) {
-      setStatus('error');
-      setMessage('Ungültiger Link. Bitte fordere einen neuen Link an.');
-      return;
-    }
+    // Establish the recovery session. Because of the HashRouter double-hash
+    // (see utils/authHash.ts), Supabase's `detectSessionInUrl` can't parse the
+    // tokens, so we extract them ourselves and set the session explicitly. If no
+    // tokens are in the URL we fall back to any already-active session.
+    const verifyRecoverySession = async () => {
+      const { access_token, refresh_token } = parseAuthTokensFromHash();
+      if (access_token && refresh_token) {
+        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (!isMounted) return;
+        if (!error) {
+          setStatus('input');
+          setMessage('');
+          return;
+        }
+      }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!isMounted) return;
+      if (session) {
+        setStatus('input');
+        setMessage('');
+      }
+    };
 
-    // Set session to allow password reset
-    supabase.auth.setSession({
-      access_token,
-      refresh_token
-    }).catch((err) => {
-      setStatus('error');
-      setMessage(err.message || 'Fehler beim Verarbeiten des Links.');
-    });
-  }, [searchParams]);
+    // A PASSWORD_RECOVERY (or SIGNED_IN) event may still be in flight when the
+    // page mounts — listen so we react as soon as the session is ready.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!isMounted) return;
+        if (session && (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+          setStatus('input');
+          setMessage('');
+        }
+      }
+    );
+
+    verifyRecoverySession();
+
+    // If no recovery session shows up shortly, the link is invalid/expired.
+    const timeout = setTimeout(async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!isMounted) return;
+      if (!session) {
+        setStatus('error');
+        setMessage('Ungültiger oder abgelaufener Link. Bitte fordere einen neuen Link an.');
+      }
+    }, 4000);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();

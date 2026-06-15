@@ -60,11 +60,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         setUser(result.data.session?.user ?? null);
                     }
 
-                    // CRITICAL FIX: Clear the hash if it contains OAuth tokens
-                    // This prevents HashRouter from getting confused by access_token parameters
-                    // and rendering a blank screen (no matching route)
-                    if (window.location.hash && (window.location.hash.includes('access_token') || window.location.hash.includes('error_description'))) {
-                        console.log("Cleaning OAuth hash...");
+                    // Only clean up explicit OAuth *error* fragments here.
+                    // We must NOT wipe `access_token`/recovery fragments: Supabase's
+                    // `detectSessionInUrl` consumes those itself (email confirmation &
+                    // password recovery). Clearing them prematurely broke the
+                    // confirmation and reset-password flows.
+                    if (window.location.hash && window.location.hash.includes('error_description')) {
+                        console.log("Cleaning OAuth error hash...");
                         window.location.hash = '';
                     }
 
@@ -84,6 +86,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             (event, session) => {
                 setUser(session?.user ?? null);
+
+                // Password recovery: Supabase parsed the recovery tokens from the URL
+                // and established a temporary session. Route the user to the
+                // reset-password form so they can set a new password. The form only
+                // needs an active session — it no longer parses tokens itself.
+                if (event === 'PASSWORD_RECOVERY') {
+                    if (!window.location.hash.startsWith('#/reset-password')) {
+                        window.location.hash = '#/reset-password';
+                    }
+                    return;
+                }
 
                 // Migrate guest data when user signs in - DO NOT await to prevent blocking
                 if (event === 'SIGNED_IN' && session?.user) {
@@ -106,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             password,
             options: {
                 data: { display_name: displayName },
-                emailRedirectTo: window.location.origin
+                emailRedirectTo: `${window.location.origin}/#/email-confirmation`
             }
         });
 

@@ -5,6 +5,7 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { CheckCircle, XCircle, Loader2, ArrowRight } from 'lucide-react';
 import { useApp } from '../../App';
+import { parseAuthTokensFromHash } from '../../utils/authHash';
 
 export default function EmailConfirmation() {
   const [searchParams] = useSearchParams();
@@ -14,39 +15,50 @@ export default function EmailConfirmation() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
+    let isMounted = true;
+    let timeout: ReturnType<typeof setTimeout>;
+
+    const showSuccess = () => {
+      if (!isMounted) return;
+      setStatus('success');
+      setMessage('E-Mail erfolgreich bestätigt! Willkommen!');
+      setTimeout(() => navigate('/'), 2000);
+    };
+
     const handleEmailConfirmation = async () => {
       try {
-        // Supabase kann verschiedene URL-Parameter-Formate verwenden
-        const token_hash = searchParams.get('token_hash');
-        const type = searchParams.get('type');
-        const access_token = searchParams.get('access_token');
-        const refresh_token = searchParams.get('refresh_token');
+        // Supabase kann verschiedene Link-Formate verwenden:
+        // 1. Implicit Flow: Tokens im Hash-Fragment (#access_token=...&type=signup)
+        //    -> werden automatisch von `detectSessionInUrl` konsumiert und setzen
+        //       eine Session. Wir prüfen daher zuerst auf eine aktive Session.
+        // 2. token_hash im Query-String (?token_hash=...&type=...) -> verifyOtp.
+        const params = new URLSearchParams(window.location.search);
+        const token_hash = searchParams.get('token_hash') || params.get('token_hash');
+        const type = searchParams.get('type') || params.get('type');
 
-        // Wenn access_token vorhanden ist, wurde die Bestätigung bereits verarbeitet
-        if (access_token && refresh_token) {
-          // Session wird automatisch durch Supabase Client gesetzt
-          const { data: { session }, error: sessionError } = await supabase.auth.setSession({
-            access_token,
-            refresh_token
+        // Fall 0: Tokens im Hash-Fragment (Implicit Flow). Wegen des HashRouter-
+        // Doppel-Hash (siehe utils/authHash.ts) kann detectSessionInUrl sie nicht
+        // lesen — wir extrahieren sie selbst und setzen die Session.
+        const hashTokens = parseAuthTokensFromHash();
+        if (hashTokens.access_token && hashTokens.refresh_token) {
+          const { data: { session: s }, error } = await supabase.auth.setSession({
+            access_token: hashTokens.access_token,
+            refresh_token: hashTokens.refresh_token,
           });
-
-          if (sessionError) {
-            setStatus('error');
-            setMessage(sessionError.message || 'Fehler bei der Sitzungserstellung.');
+          if (!error && s?.user) {
+            showSuccess();
             return;
           }
+        }
 
-          if (session?.user) {
-            setStatus('success');
-            setMessage('E-Mail erfolgreich bestätigt! Willkommen!');
-            setTimeout(() => {
-              navigate('/');
-            }, 2000);
-          }
+        // Fall 1: Session bereits gesetzt
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          showSuccess();
           return;
         }
 
-        // Alternative: OTP-Verifizierung mit token_hash
+        // Fall 2: OTP-Verifizierung mit token_hash
         if (token_hash && type) {
           const { data, error } = await supabase.auth.verifyOtp({
             token_hash,
@@ -54,31 +66,52 @@ export default function EmailConfirmation() {
           });
 
           if (error) {
+            if (!isMounted) return;
             setStatus('error');
             setMessage(error.message || 'Fehler bei der E-Mail-Bestätigung.');
             return;
           }
 
           if (data.user) {
-            setStatus('success');
-            setMessage('E-Mail erfolgreich bestätigt! Willkommen!');
-            setTimeout(() => {
-              navigate('/');
-            }, 2000);
+            showSuccess();
           }
           return;
         }
 
-        // Keine gültigen Parameter gefunden
-        setStatus('error');
-        setMessage('Ungültiger Bestätigungslink. Bitte verwenden Sie den Link aus der E-Mail.');
+        // Fall 3: Tokens evtl. noch in Verarbeitung (detectSessionInUrl async).
+        // Kurz auf ein SIGNED_IN-Event warten, bevor wir einen Fehler zeigen.
+        timeout = setTimeout(async () => {
+          const { data: { session: late } } = await supabase.auth.getSession();
+          if (!isMounted) return;
+          if (late?.user) {
+            showSuccess();
+          } else {
+            setStatus('error');
+            setMessage('Ungültiger Bestätigungslink. Bitte verwenden Sie den Link aus der E-Mail.');
+          }
+        }, 3000);
       } catch (err: any) {
+        if (!isMounted) return;
         setStatus('error');
         setMessage(err.message || 'Ein Fehler ist aufgetreten.');
       }
     };
 
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (session?.user && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+          showSuccess();
+        }
+      }
+    );
+
     handleEmailConfirmation();
+
+    return () => {
+      isMounted = false;
+      if (timeout) clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, [searchParams, navigate]);
 
   return (

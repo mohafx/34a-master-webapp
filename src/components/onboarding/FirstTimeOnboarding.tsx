@@ -32,8 +32,8 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
 
     // A date is invalid if it's in the past (today counts as past for an exam date)
     const isPastDate = examDate !== '' && new Date(examDate) <= new Date(new Date().setHours(0, 0, 0, 0));
-    // Derived state for button enabled
-    const screen1Complete = (skipDate || examDate !== '') && !isPastDate;
+    // When the date section is hidden (existing plan/date), the user can always proceed.
+    const screen1Complete = shouldSkipDateScreen || ((skipDate || examDate !== '') && !isPastDate);
 
     const nextScreen = useCallback(() => {
         if (currentScreen < totalScreens - 1) {
