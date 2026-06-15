@@ -1,14 +1,13 @@
 # 34a Master Webapp
 
-Diese App liegt im Workspace bewusst im Unterordner `34a Master Webapp/app-src/`.
+Der aktive Frontend-Code liegt in `src/`. (`app-src/` ist ein ungenutztes Legacy-Duplikat.)
 
 ## Orientierung
 
-- Gesamtsystem: [../../docs/README.md](../../docs/README.md)
+- **KI-Agenten / Onboarding:** [AGENTS.md](AGENTS.md) und [docs/agents/](docs/agents/)
 - Webapp-Doku: [../docs/README.md](../docs/README.md)
-- Einfacher Einstieg: [../docs/START_HERE_DE.md](../docs/START_HERE_DE.md)
-- Struktur und Ordner: [../docs/ARCHITEKTUR_UND_ORDNER.md](../docs/ARCHITEKTUR_UND_ORDNER.md)
-- Betrieb und Setups: [../docs/BETRIEB_UND_SETUPS.md](../docs/BETRIEB_UND_SETUPS.md)
+- Systemarchitektur: [../docs/SYSTEMARCHITEKTUR.md](../docs/SYSTEMARCHITEKTUR.md)
+- Lokale Entwicklung: [../docs/LOKAL_ENTWICKLUNG.md](../docs/LOKAL_ENTWICKLUNG.md)
 
 ## Tech-Stack
 
