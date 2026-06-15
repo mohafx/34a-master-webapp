@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { trackOAuthLoginOnce } from '../../services/serverAnalytics';
+import { parseAuthTokensFromHash } from '../../utils/authHash';
 
 // Supabase storageKey is `sb-<project-ref>-auth-token`; the PKCE verifier lives
 // under `<storageKey>-code-verifier`. We read it directly only to DIAGNOSE the
@@ -83,7 +84,23 @@ export default function AuthCallback() {
             const { data: { session } } = await supabase.auth.getSession();
             if (session) return finish(session, 'getSession-initial');
 
-            // 2. Look for a code we must exchange manually.
+            // 2. IMPLICIT FLOW (the actual Google case): GoTrue returns the tokens
+            //    directly in the URL hash. Because this app uses HashRouter, the
+            //    redirect target already has a hash route, so the result is a
+            //    DOUBLE hash: `…/#/auth/callback#access_token=…&refresh_token=…`.
+            //    Supabase's detectSessionInUrl mis-parses the double hash (it reads
+            //    `/auth/callback#access_token` as the key) and never sets a session.
+            //    We parse the tokens from the LAST '#' segment ourselves and set
+            //    the session explicitly — same approach as reset-password/confirm.
+            const { access_token, refresh_token } = parseAuthTokensFromHash(window.location.hash);
+            if (access_token && refresh_token) {
+                console.log('[AuthCallback] implicit tokens found in hash → setSession');
+                const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
+                if (!error && data.session) return finish(data.session, 'implicit-setSession');
+                if (error) console.error('[AuthCallback] setSession error:', error.message);
+            }
+
+            // 3. PKCE FLOW: look for a code we must exchange manually.
             const { code, where } = extractCode();
             const verifierKey = findCodeVerifierKey();
             const hasVerifier = !!verifierKey;
@@ -111,7 +128,7 @@ export default function AuthCallback() {
                     console.warn('[AuthCallback] manual exchange threw (maybe already handled):', err);
                 }
             }
-            // 3. Otherwise wait: onAuthStateChange or the timeout fallback resolves it.
+            // 4. Otherwise wait: onAuthStateChange or the timeout fallback resolves it.
         };
 
         run();
