@@ -1,20 +1,60 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { trackOAuthLoginOnce } from '../../services/serverAnalytics';
 
+// Supabase storageKey is `sb-<project-ref>-auth-token`; the PKCE verifier lives
+// under `<storageKey>-code-verifier`. We read it directly only to DIAGNOSE the
+// "redirected but not logged in" failure (verifier missing ⇒ wrong-origin
+// redirect / allowlist misconfig).
+const findCodeVerifierKey = (): string | null => {
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.endsWith('-code-verifier')) return key;
+    }
+    return null;
+};
+
+/**
+ * Extract the PKCE `code` from wherever GoTrue may have put it. With a
+ * HashRouter redirect (`…/#/auth/callback`) GoTrue can deliver the code as:
+ *   a) a real query param:        https://app/?code=xxx#/auth/callback
+ *   b) a query inside the hash:   https://app/#/auth/callback?code=xxx
+ *   c) a second hash fragment:    https://app/#/auth/callback#code=xxx
+ * Case (a) is handled by `detectSessionInUrl`; (b)/(c) are not, so we parse them.
+ */
+const extractCode = (): { code: string | null; where: string } => {
+    const search = new URLSearchParams(window.location.search);
+    if (search.get('code')) return { code: search.get('code'), where: 'search' };
+
+    const hash = window.location.hash || '';
+    // query-in-hash: split off everything after the first '?'
+    if (hash.includes('?')) {
+        const code = new URLSearchParams(hash.split('?')[1]).get('code');
+        if (code) return { code, where: 'hash-query' };
+    }
+    // double-hash: take the last '#'-segment and parse as params
+    const lastSegment = hash.includes('#') ? hash.substring(hash.lastIndexOf('#') + 1) : '';
+    if (lastSegment) {
+        const code = new URLSearchParams(lastSegment).get('code');
+        if (code) return { code, where: 'double-hash' };
+    }
+    return { code: null, where: 'none' };
+};
+
 export default function AuthCallback() {
     const navigate = useNavigate();
+    const [diag, setDiag] = useState<string>('');
 
     useEffect(() => {
         let finished = false;
 
-        const finish = (session: Session | null) => {
+        const finish = (session: Session | null, reason: string) => {
             if (finished) return;
             finished = true;
+            console.log(`[AuthCallback] finish — session=${!!session} reason=${reason}`);
             if (session) {
-                console.log('OAuth successful, user logged in');
                 trackOAuthLoginOnce(session.user.id, {
                     email: session.user.email,
                     method: session.user.app_metadata?.provider || 'google',
@@ -26,52 +66,61 @@ export default function AuthCallback() {
             }
         };
 
-        // The client is configured with `detectSessionInUrl: true`. For a PKCE
-        // code that lands in `window.location.search` (the usual case: GoTrue
-        // appends `?code=` *before* the `#` of our HashRouter redirect, so the
-        // URL becomes `https://app/?code=...#/auth/callback`), the client
-        // already exchanges it automatically at startup. Calling
-        // exchangeCodeForSession again here would fail — a PKCE code is
-        // single-use — and wrongly bounce the user to the error page.
-        //
-        // So: listen for the session that detectSessionInUrl establishes, and
-        // only manually exchange a code that lives in the URL *hash*, which
-        // detectSessionInUrl cannot see.
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (session) finish(session);
+        // The client config has `detectSessionInUrl: true`, so a code that lands
+        // in `window.location.search` is exchanged automatically at startup.
+        // We listen for that, and additionally handle codes that land in the
+        // URL *hash* (which detectSessionInUrl cannot see) ourselves.
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            console.log(`[AuthCallback] onAuthStateChange event=${event} session=${!!session}`);
+            if (session) finish(session, `event:${event}`);
         });
 
         const run = async () => {
-            // 1. Maybe detectSessionInUrl already established the session.
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session) return finish(session);
+            console.log('[AuthCallback] URL =', window.location.href);
 
-            // 2. A code in the hash (e.g. `#/auth/callback?code=...`) is NOT seen
-            //    by detectSessionInUrl — exchange it ourselves.
-            const hashQuery = window.location.hash.includes('?')
-                ? window.location.hash.split('?')[1]
-                : '';
-            const hashCode = new URLSearchParams(hashQuery).get('code');
-            if (hashCode) {
+            // 1. Maybe detectSessionInUrl already established the session
+            //    (getSession awaits the client's initialize/exchange).
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) return finish(session, 'getSession-initial');
+
+            // 2. Look for a code we must exchange manually.
+            const { code, where } = extractCode();
+            const verifierKey = findCodeVerifierKey();
+            const hasVerifier = !!verifierKey;
+            console.log(`[AuthCallback] code=${code ? `found(${where})` : 'NONE'} verifier=${hasVerifier ? 'present' : 'MISSING'}`);
+
+            if (code && !hasVerifier) {
+                // Root cause for "redirected but not logged in": the PKCE verifier
+                // was stored on a DIFFERENT origin than this callback. Almost
+                // always a Supabase redirect-allowlist / Site-URL mismatch.
+                setDiag('Verifier fehlt — wahrscheinlich Redirect auf andere Domain. Siehe Konsole.');
+                console.error(
+                    '[AuthCallback] PKCE code present but code-verifier MISSING in this origin\'s localStorage. ' +
+                    'The OAuth flow started on a different origin than this callback. Check Supabase ' +
+                    'Auth → URL Configuration: Site URL + Redirect allowlist must include ' +
+                    `${window.location.origin}/#/auth/callback (current origin: ${window.location.origin}).`
+                );
+                // Still wait for the timeout fallback in case detectSessionInUrl is mid-flight.
+            } else if (code && hasVerifier && where !== 'search') {
+                // detectSessionInUrl won't have touched a hash-borne code — exchange it.
                 try {
-                    const { data, error } = await supabase.auth.exchangeCodeForSession(hashCode);
-                    if (!error && data.session) return finish(data.session);
+                    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+                    if (!error && data.session) return finish(data.session, `manual-exchange:${where}`);
+                    if (error) console.error('[AuthCallback] exchangeCodeForSession error:', error.message);
                 } catch (err) {
-                    console.warn('Manual code exchange failed (likely already handled):', err);
+                    console.warn('[AuthCallback] manual exchange threw (maybe already handled):', err);
                 }
             }
-            // 3. Otherwise wait: detectSessionInUrl may still be in flight; the
-            //    onAuthStateChange listener or the timeout fallback resolves it.
+            // 3. Otherwise wait: onAuthStateChange or the timeout fallback resolves it.
         };
 
         run();
 
-        // Fallback: re-check the session after a short delay. Covers the race
-        // where detectSessionInUrl exchanged the code but the SIGNED_IN event
-        // had already fired before this component mounted.
+        // Fallback: re-check after a delay. Covers the race where SIGNED_IN fired
+        // before this component mounted, or detectSessionInUrl is still in flight.
         const timer = setTimeout(async () => {
             const { data: { session } } = await supabase.auth.getSession();
-            finish(session);
+            finish(session, 'timeout-fallback');
         }, 4000);
 
         return () => {
@@ -90,6 +139,11 @@ export default function AuthCallback() {
                 <p className="text-slate-600 dark:text-slate-400 mt-2">
                     Du wirst gleich weitergeleitet.
                 </p>
+                {diag && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-4 max-w-xs mx-auto">
+                        {diag}
+                    </p>
+                )}
             </div>
         </div>
     );
