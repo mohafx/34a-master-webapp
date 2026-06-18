@@ -28,6 +28,7 @@ Aus `src/services/database.ts` (`supabase.from('…')`) referenziert:
 | `user_lernplans` | Generierte Lernpläne (siehe `lernplanGenerator.ts`) |
 | `written_exam_questions` | Fragen der schriftlichen Prüfung |
 | `written_exam_sessions` | Prüfungs-Sessions/Versuche |
+| `oral_exam_sessions` | Mündliche Prüfungssimulation: Sessions, Transkript & KI-Bewertung (RLS: nur eigene Zeilen). Details: [../produkt/ki-muendliche-pruefungssimulation-funktionsweise.md](../produkt/ki-muendliche-pruefungssimulation-funktionsweise.md) |
 | `waitlist` | Warteliste / Lead-Capture |
 
 > Die `_preview`-Tabellen/Views liefern öffentlich sichtbare Inhalte (Free-Tier); die vollständigen

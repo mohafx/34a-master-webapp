@@ -88,6 +88,11 @@ const AdminGuard = lazy(() => import('./components/pages/admin/AdminGuard'));
 const AdminWrittenExamBrowser = lazy(() => import('./components/pages/admin/AdminWrittenExamBrowser'));
 const AdminWrittenExamQuestionList = lazy(() => import('./components/pages/admin/AdminWrittenExamQuestionList'));
 const AdminWrittenExamQuiz = lazy(() => import('./components/pages/admin/AdminWrittenExamQuiz'));
+// Mündliche Prüfungssimulation (KI) — Soft-Launch: alle Routen hinter AdminGuard
+const OralExamIntro = lazy(() => import('./components/pages/OralExamIntro'));
+const OralExamLive = lazy(() => import('./components/pages/OralExamLive'));
+const OralExamResults = lazy(() => import('./components/pages/OralExamResults'));
+const OralExamHistory = lazy(() => import('./components/pages/OralExamHistory'));
 
 // Password-recovery flow detection. On the reset-password route the first-time
 // onboarding must be suppressed: the recovery session looks like a "new login"
@@ -905,6 +910,10 @@ function AppContent() {
                     <Route path="/written-exam" element={<WrittenExam />} />
                     <Route path="/written-exam/results/:sessionId" element={<WrittenExamResults />} />
                     <Route path="/exam/history" element={<WrittenExamHistory />} />
+                    <Route path="/oral-exam" element={<AdminGuard><OralExamIntro /></AdminGuard>} />
+                    <Route path="/oral-exam/live" element={<AdminGuard><OralExamLive /></AdminGuard>} />
+                    <Route path="/oral-exam/results/:sessionId" element={<AdminGuard><OralExamResults /></AdminGuard>} />
+                    <Route path="/oral-exam/history" element={<AdminGuard><OralExamHistory /></AdminGuard>} />
                     <Route path="/statistics" element={<Statistics />} />
                     <Route path="/lernplan" element={<Navigate to="/" replace />} />
 

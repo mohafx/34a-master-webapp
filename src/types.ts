@@ -169,3 +169,83 @@ export const MINI_EXAM_TOPIC_DISTRIBUTION = {
 } as const;
 
 export type WrittenExamTopic = keyof typeof TOPIC_DISTRIBUTION;
+
+// ── Mündliche Prüfungssimulation (KI / ElevenLabs + Gemini) ──────────────────
+// Spiegelt die Tabelle oral_exam_sessions und den Vertrag der Edge Functions
+// oral-exam-session / oral-exam-evaluation. Siehe
+// docs/produkt/ki-muendliche-pruefungssimulation-umsetzung.md
+
+export type OralExamMode = 'free_test_3q' | 'full_5min';
+export type OralExamStatus = 'running' | 'done' | 'aborted';
+
+export interface OralExamTranscriptTurn {
+  role: 'examiner' | 'candidate';
+  text: string;
+}
+
+export interface OralExamTopicScore {
+  topic: string;
+  score_pct: number;
+  comment?: string;
+}
+
+export interface OralExamModelAnswer {
+  scenario: string;
+  musterantwort: string;
+}
+
+export interface OralExamFeedback {
+  strengths: string[];
+  gaps: string[];
+  model_answers: OralExamModelAnswer[];
+  roter_faden: string[];
+  next_step: string;
+}
+
+// Antwort von oral-exam-evaluation ({ result: OralExamEvaluation }).
+export interface OralExamEvaluation extends OralExamFeedback {
+  overall_score_pct: number;
+  passed: boolean;
+  topic_scores: OralExamTopicScore[];
+}
+
+// Eine Zeile aus oral_exam_sessions (snake_case wie in der DB).
+export interface OralExamSession {
+  id: string;
+  user_id: string;
+  mode: OralExamMode;
+  focus_topic: string | null;
+  status: OralExamStatus;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_s: number | null;
+  transcript: OralExamTranscriptTurn[] | null;
+  overall_score_pct: number | null;
+  passed: boolean | null;
+  topic_scores: OralExamTopicScore[] | null;
+  feedback: OralExamFeedback | null;
+  created_at: string;
+}
+
+// Erfolgreiche Antwort von oral-exam-session.
+export interface OralExamStartResponse {
+  sessionId: string;
+  mode: OralExamMode;
+  maxDurationSec: number;
+  signedUrl: string;
+  dynamicVariables: {
+    mode: string;
+    focus_topic: string;
+    candidate_name: string;
+  };
+}
+
+// Fokus-Themen für die mündliche Simulation (Schwerpunkt IHK: Umgang/Deeskalation).
+export const ORAL_EXAM_FOCUS_TOPICS = [
+  'Umgang mit Menschen / Deeskalation',
+  'Verhalten in Gefahrensituationen',
+  'Öffentliche Sicherheit und Ordnung',
+  'Bürgerliches Recht (BGB)',
+  'Straf- und Verfahrensrecht',
+  'Gewerberecht / Datenschutz',
+] as const;
