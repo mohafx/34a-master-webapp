@@ -180,6 +180,8 @@ export const db = {
             lessonId: q.lesson_id,
             explanationDE: '', // Empty for preview
             explanationAR: '',
+            explanationImageUrl: q.question_explanation_image_url || undefined,
+            explanationImageAltDE: q.question_explanation_image_alt_de || undefined,
             answers: [], // Empty for preview
             is_free: q.is_free ?? false // Include is_free field
         }));
@@ -629,6 +631,18 @@ export const db = {
             .upsert({
                 id: userId,
                 exam_date: examDate,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'id' });
+
+        if (error) throw error;
+    },
+
+    async markOnboardingCompleted(userId: string) {
+        const { error } = await supabase
+            .from('user_profiles')
+            .upsert({
+                id: userId,
+                onboarding_completed: true,
                 updated_at: new Date().toISOString()
             }, { onConflict: 'id' });
 

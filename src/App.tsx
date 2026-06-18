@@ -302,20 +302,37 @@ function AppContent() {
     const prevUser = prevAuthUserRef.current;
     const isNewLogin = !prevUser && authUser; // transitioned from null → logged-in
     if (isNewLogin && authUser && !isAuthFlowRoute()) {
-      const alreadyOnboarded = hasCompletedOnboarding(authUser.id);
-      if (!alreadyOnboarded) {
-        // Existing users (data present but flag missing) are auto-marked so the
-        // overlay doesn't reappear on a new device or after localStorage is cleared.
-        const hasExistingData = !!localStorage.getItem('34a_settings')
-          || !!localStorage.getItem('34a_lernplan')
-          || !!localStorage.getItem('34a_exam_date');
-        if (hasExistingData) {
-          markOnboardingCompleted(authUser.id);
+      const currentUserId = authUser.id;
+      // Fast-Path: lokaler Flag bekannt → kein Onboarding, keine DB-Abfrage nötig.
+      if (hasCompletedOnboarding(currentUserId)) {
+        prevAuthUserRef.current = authUser;
+        return;
+      }
+      // Autoritativ: Onboarding-Status serverseitig prüfen (geräteübergreifend).
+      // So erscheint das Onboarding NUR nach der Registrierung/erstem Mal — nicht
+      // bei jeder Anmeldung auf neuem Gerät / nach gelöschtem localStorage.
+      (async () => {
+        let completedOnServer = false;
+        try {
+          const profile = await db.getUserProfile(currentUserId) as any;
+          // Profil existiert und ist als erledigt markiert → nichts zeigen.
+          completedOnServer = !!profile?.onboarding_completed;
+        } catch (err) {
+          console.error('Onboarding-Status konnte nicht geladen werden:', err);
+          // Im Fehlerfall: vorhandene lokale Daten als "bereits onboarded" werten,
+          // um wiederholtes Onboarding zu vermeiden.
+          completedOnServer = !!localStorage.getItem('34a_settings')
+            || !!localStorage.getItem('34a_lernplan')
+            || !!localStorage.getItem('34a_exam_date');
+        }
+
+        if (completedOnServer) {
+          markOnboardingCompleted(currentUserId);
         } else {
           // Small delay so the app finishes loading before showing onboarding
           setTimeout(() => setShowFirstTimeOnboarding(true), 300);
         }
-      }
+      })();
     }
     prevAuthUserRef.current = authUser;
   }, [authUser, authLoading, isOverrideActive]);
@@ -849,9 +866,12 @@ function AppContent() {
             }
           }
 
-          // Mark onboarding completed
+          // Mark onboarding completed — lokal (Fast-Path) UND serverseitig (geräteübergreifend).
           if (authUser) {
             markOnboardingCompleted(authUser.id);
+            db.markOnboardingCompleted(authUser.id).catch(err =>
+              console.error('Error persisting onboarding flag:', err)
+            );
           }
 
           // Track onboarding completion
