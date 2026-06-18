@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, CheckCircle2, XCircle, Mic, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, XCircle, Mic, ChevronRight, AlertCircle } from 'lucide-react';
 import { listOralExamSessions } from '../../services/oralExam';
 import type { OralExamSession } from '../../types';
 
@@ -70,34 +70,35 @@ export default function OralExamHistory() {
                 <div className="space-y-3">
                     {sessions.map((s) => {
                         const done = s.status === 'done' && s.overall_score_pct != null;
+                        const aborted = s.status === 'aborted';
+                        const failed = !done;
                         const passed = s.passed ?? (s.overall_score_pct ?? 0) >= 50;
                         return (
                             <button
                                 key={s.id}
-                                onClick={() => done && navigate(`/oral-exam/results/${s.id}`)}
-                                disabled={!done}
-                                className="w-full text-left bg-white dark:bg-slate-800 rounded-[20px] p-4 shadow-sm border border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-all active:scale-[0.99] flex items-center gap-4 disabled:opacity-60 disabled:cursor-default"
+                                onClick={() => navigate(`/oral-exam/results/${s.id}`)}
+                                className="w-full text-left bg-white dark:bg-slate-800 rounded-[20px] p-4 shadow-sm border border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-all active:scale-[0.99] flex items-center gap-4"
                             >
                                 <div className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 ${done
                                     ? passed
                                         ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-300'
                                         : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300'
-                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-400'
+                                    : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300'
                                     }`}>
-                                    {done ? (passed ? <CheckCircle2 size={22} /> : <XCircle size={22} />) : <Mic size={20} />}
+                                    {done ? (passed ? <CheckCircle2 size={22} /> : <XCircle size={22} />) : <AlertCircle size={22} />}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                         <span className="font-black text-slate-900 dark:text-white">
-                                            {done ? `${s.overall_score_pct}%` : s.status === 'running' ? 'Abgebrochen' : '—'}
+                                            {done ? `${s.overall_score_pct}%` : aborted ? 'Abgebrochen' : 'Auswertung fehlgeschlagen'}
                                         </span>
                                         <span className="text-xs font-bold text-slate-400">{MODE_LABEL[s.mode] ?? s.mode}</span>
                                     </div>
                                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                                        {formatDate(s.created_at)}{s.focus_topic ? ` · ${s.focus_topic}` : ''}
+                                        {formatDate(s.created_at)}{s.focus_topic ? ` · ${s.focus_topic}` : ''}{failed ? aborted ? ' · Neue Prüfung' : ' · Retry' : ''}
                                     </p>
                                 </div>
-                                {done && <ChevronRight size={20} className="text-slate-300 dark:text-slate-600 flex-shrink-0" />}
+                                <ChevronRight size={20} className="text-slate-300 dark:text-slate-600 flex-shrink-0" />
                             </button>
                         );
                     })}

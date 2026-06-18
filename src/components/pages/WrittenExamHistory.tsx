@@ -55,7 +55,7 @@ export default function WrittenExamHistory() {
           showOralExam ? listOralExamSessions() : Promise.resolve([]),
         ]);
         setWrittenSessions(written);
-        setOralSessions(oral.filter(s => s.status === 'done'));
+        setOralSessions(oral.filter(s => s.status === 'done' || s.status === 'evaluation_failed' || s.status === 'running' || s.status === 'aborted'));
       } catch (error) {
         console.error('Error loading exam history:', error);
       } finally {
@@ -198,6 +198,9 @@ export default function WrittenExamHistory() {
               </h2>
               <div className="space-y-3">
                 {oralSessions.map(s => {
+                  const done = s.status === 'done' && s.overall_score_pct != null;
+                  const aborted = s.status === 'aborted';
+                  const failed = !done;
                   const passed = s.passed ?? (s.overall_score_pct ?? 0) >= 50;
                   return (
                     <button
@@ -206,20 +209,20 @@ export default function WrittenExamHistory() {
                       className="w-full bg-white dark:bg-slate-800 rounded-[20px] p-4 border border-slate-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-all active:scale-[0.99] text-left"
                     >
                       <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${passed ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-rose-50 dark:bg-rose-900/20'}`}>
-                          <Mic className={passed ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'} size={24} />
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${done && passed ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-rose-50 dark:bg-rose-900/20'}`}>
+                          <Mic className={done && passed ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'} size={24} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            {passed
+                            {done && passed
                               ? <CheckCircle className="text-emerald-500 flex-shrink-0" size={14} />
                               : <XCircle className="text-rose-500 flex-shrink-0" size={14} />}
-                            <span className={`text-xs font-black uppercase tracking-wider ${passed ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                              {passed ? 'Bestanden' : 'Nicht bestanden'}
+                            <span className={`text-xs font-black uppercase tracking-wider ${done && passed ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                              {aborted ? 'Abgebrochen' : failed ? 'Auswertung fehlgeschlagen' : passed ? 'Bestanden' : 'Nicht bestanden'}
                             </span>
                           </div>
                           <h3 className="font-black text-slate-900 dark:text-white">
-                            {s.overall_score_pct}% · Mündliche Prüfung
+                            {done ? `${s.overall_score_pct}%` : aborted ? 'Neue Prüfung möglich' : 'Retry möglich'} · Mündliche Prüfung
                           </h3>
                           <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
                             <Clock size={12} />

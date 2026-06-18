@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
-// Bewertet das Transkript einer mündlichen Prüfungssimulation mit Gemini und schreibt
+// Bewertet das Transkript einer mündlichen Prüfungssimulation mit OpenAI und schreibt
 // das Ergebnis in oral_exam_sessions. Für JEDEN eingeloggten Nutzer.
 // Siehe docs/produkt/ki-muendliche-pruefungssimulation-umsetzung.md
 
@@ -10,7 +10,8 @@ const corsHeaders = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GOOGLE_AI_API_KEY = Deno.env.get("GOOGLE_AI_API_KEY") || "";
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || Deno.env.get("openai_key") || "";
+const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4.1";
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY") || "";
 
 const supabaseAdmin = createClient(
@@ -19,44 +20,124 @@ const supabaseAdmin = createClient(
     { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-async function callGemini(prompt: string, maxTokens = 8192): Promise<string | null> {
-    if (!GOOGLE_AI_API_KEY) {
-        console.error("Gemini: GOOGLE_AI_API_KEY fehlt.");
+const evaluationSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+        overall_score_pct: { type: "integer", minimum: 0, maximum: 100 },
+        passed: { type: "boolean" },
+        summary: { type: "string" },
+        topic_scores: {
+            type: "array",
+            items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                    topic: { type: "string" },
+                    score_pct: { type: "integer", minimum: 0, maximum: 100 },
+                    comment: { type: "string" },
+                },
+                required: ["topic", "score_pct", "comment"],
+            },
+        },
+        answer_evaluations: {
+            type: "array",
+            items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                    question: { type: "string" },
+                    candidate_answer: { type: "string" },
+                    score_pct: { type: "integer", minimum: 0, maximum: 100 },
+                    verdict: { type: "string", enum: ["correct", "partial", "wrong"] },
+                    recommendation: { type: "string" },
+                },
+                required: ["question", "candidate_answer", "score_pct", "verdict", "recommendation"],
+            },
+        },
+        strengths: { type: "array", items: { type: "string" } },
+        gaps: { type: "array", items: { type: "string" } },
+        model_answers: {
+            type: "array",
+            items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                    scenario: { type: "string" },
+                    musterantwort: { type: "string" },
+                },
+                required: ["scenario", "musterantwort"],
+            },
+        },
+        roter_faden: { type: "array", items: { type: "string" } },
+        next_step: { type: "string" },
+    },
+    required: [
+        "overall_score_pct",
+        "passed",
+        "summary",
+        "topic_scores",
+        "answer_evaluations",
+        "strengths",
+        "gaps",
+        "model_answers",
+        "roter_faden",
+        "next_step",
+    ],
+};
+
+function extractOpenAIText(data: any): string | null {
+    if (typeof data?.output_text === "string") return data.output_text;
+    const chunks: string[] = [];
+    for (const item of data?.output ?? []) {
+        for (const content of item?.content ?? []) {
+            const text = content?.text ?? content?.output_text;
+            if (typeof text === "string") chunks.push(text);
+        }
+    }
+    return chunks.length > 0 ? chunks.join("") : null;
+}
+
+async function callOpenAI(prompt: string, maxTokens = 8192): Promise<string | null> {
+    if (!OPENAI_API_KEY) {
+        console.error("OpenAI: OPENAI_API_KEY fehlt.");
         return null;
     }
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GOOGLE_AI_API_KEY}`;
-    const res = await fetch(url, {
+    const res = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Authorization": `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-                temperature: 0.3,
-                maxOutputTokens: maxTokens,
-                responseMimeType: "application/json",
-                // WICHTIG: "Thinking" deaktivieren — sonst verbraucht gemini-2.5-flash das
-                // Output-Token-Budget fürs Denken und liefert leeren/abgeschnittenen Text (MAX_TOKENS).
-                thinkingConfig: { thinkingBudget: 0 },
-            },
-            safetySettings: [
-                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+            model: OPENAI_MODEL,
+            input: [
+                {
+                    role: "system",
+                    content: "Du bist ein erfahrener IHK-Prüfer für die Sachkundeprüfung nach §34a GewO. Antworte ausschließlich mit JSON im vorgegebenen Schema.",
+                },
+                { role: "user", content: prompt },
             ],
+            max_output_tokens: maxTokens,
+            temperature: 0.3,
+            text: {
+                format: {
+                    type: "json_schema",
+                    name: "oral_exam_evaluation",
+                    schema: evaluationSchema,
+                    strict: true,
+                },
+            },
         }),
     });
     if (!res.ok) {
-        console.error("Gemini HTTP error:", res.status, await res.text());
+        console.error("OpenAI HTTP error:", res.status, await res.text());
         return null;
     }
     const data = await res.json();
-    const candidate = data?.candidates?.[0];
-    const text = candidate?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? null;
+    const text = extractOpenAIText(data);
     if (!text) {
-        // Diagnose: warum kam kein Text? (z. B. finishReason MAX_TOKENS / SAFETY)
-        console.error("Gemini lieferte keinen Text. finishReason:", candidate?.finishReason,
-            "promptFeedback:", JSON.stringify(data?.promptFeedback ?? {}));
+        console.error("OpenAI lieferte keinen Text. status:", data?.status, "incomplete_details:", JSON.stringify(data?.incomplete_details ?? {}));
     }
     return text;
 }
@@ -140,6 +221,11 @@ serve(async (req) => {
         return new Response(null, { headers: corsHeaders });
     }
 
+    let requestSessionId: string | null = null;
+    let requestUserId: string | null = null;
+    let requestDurationS: number | null = null;
+    let resolvedTranscript: { role: "examiner" | "candidate"; text: string }[] | null = null;
+
     try {
         const authClient = createClient(
             Deno.env.get("SUPABASE_URL") ?? "",
@@ -152,16 +238,19 @@ serve(async (req) => {
                 headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 401,
             });
         }
+        requestUserId = user.id;
 
         const { sessionId, transcript: clientTranscript, durationS, conversationId } = await req.json();
+        requestSessionId = sessionId ?? null;
+        requestDurationS = typeof durationS === "number" ? Math.round(durationS) : null;
         if (!sessionId) {
             throw new Error("sessionId ist erforderlich.");
         }
 
-        // Idempotenz: bereits ausgewertet? → vorhandenes Ergebnis zurückgeben (kein Doppel-Gemini).
+        // Idempotenz: bereits ausgewertet? → vorhandenes Ergebnis zurückgeben (kein Doppel-OpenAI).
         const { data: existing } = await supabaseAdmin
             .from("oral_exam_sessions")
-            .select("status, overall_score_pct, passed, topic_scores, feedback, audio_path")
+            .select("status, overall_score_pct, passed, topic_scores, feedback, audio_path, transcript, duration_s")
             .eq("id", sessionId)
             .eq("user_id", user.id)
             .maybeSingle();
@@ -177,8 +266,25 @@ serve(async (req) => {
         if (!transcript || transcript.length === 0) {
             transcript = Array.isArray(clientTranscript) ? clientTranscript : [];
         }
+        if ((!transcript || transcript.length === 0) && Array.isArray(existing?.transcript)) {
+            transcript = existing.transcript;
+        }
         if (transcript.length === 0) {
             throw new Error("Kein Transkript verfügbar.");
+        }
+        resolvedTranscript = transcript;
+
+        // Transkript früh speichern, damit ein späterer KI-/Provider-Fehler retryfähig bleibt.
+        const { error: transcriptUpdateError } = await supabaseAdmin
+            .from("oral_exam_sessions")
+            .update({
+                transcript,
+                duration_s: requestDurationS ?? existing?.duration_s ?? null,
+            })
+            .eq("id", sessionId)
+            .eq("user_id", user.id);
+        if (transcriptUpdateError) {
+            console.error("oral-exam-evaluation transcript save failed:", transcriptUpdateError.message);
         }
 
         const transcriptText = transcript
@@ -217,10 +323,24 @@ serve(async (req) => {
             "- passed MUSS konsistent mit overall_score_pct sein (>= 50 => true).",
         ].join("\n");
 
-        const text = await callGemini(prompt, 8192);
+        const text = await callOpenAI(prompt, 8192);
         const evaluation = text ? parseEvaluation(text) : null;
 
         if (!evaluation || typeof evaluation.overall_score_pct !== "number") {
+            await supabaseAdmin
+                .from("oral_exam_sessions")
+                .update({
+                    status: "evaluation_failed",
+                    ended_at: new Date().toISOString(),
+                    duration_s: requestDurationS ?? existing?.duration_s ?? null,
+                    transcript,
+                    feedback: {
+                        error: "Auswertung konnte nicht erzeugt werden.",
+                        retryable: true,
+                    },
+                })
+                .eq("id", sessionId)
+                .eq("user_id", user.id);
             throw new Error("Auswertung konnte nicht erzeugt werden. Bitte erneut versuchen.");
         }
 
@@ -267,6 +387,22 @@ serve(async (req) => {
         );
     } catch (error: any) {
         console.error("oral-exam-evaluation error:", error?.message);
+        if (requestSessionId && requestUserId && resolvedTranscript?.length) {
+            await supabaseAdmin
+                .from("oral_exam_sessions")
+                .update({
+                    status: "evaluation_failed",
+                    ended_at: new Date().toISOString(),
+                    duration_s: requestDurationS,
+                    transcript: resolvedTranscript,
+                    feedback: {
+                        error: error?.message || "unknown",
+                        retryable: true,
+                    },
+                })
+                .eq("id", requestSessionId)
+                .eq("user_id", requestUserId);
+        }
         return new Response(JSON.stringify({ error: error?.message || "unknown" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400,
         });

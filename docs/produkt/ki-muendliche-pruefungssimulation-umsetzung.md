@@ -60,7 +60,7 @@ Browser (React 19 SPA)
   │
   ├─(3) finish() → evaluateOralExam(sessionId, transcript, durationS, conversationId)
   │        → POST oral-exam-evaluation (idempotent; Transkript autoritativ von ElevenLabs,
-  │          Fallback Client; Gemini 2.5-flash → JSON → speichern)
+  │          Fallback Client/gespeichertes Transkript; OpenAI Structured Output → speichern)
   │
   └─(4) OralExamResults (/oral-exam/results/:sessionId) → Score, Themen, Stärken/Lücken,
          Musterantworten, roter Faden, next_step.  OralExamHistory listet vergangene Läufe.
@@ -70,8 +70,8 @@ Browser (React 19 SPA)
 
 **Frontend (`src/`)**
 - Pages: `components/pages/OralExam{Intro,Live,Results,History}.tsx`
-- Service: `services/oralExam.ts` (`startOralExamSession`, `evaluateOralExam`, `getOralExamSession`,
-  `listOralExamSessions`, `abortOralExamSession`)
+- Service: `services/oralExam.ts` (`startOralExamSession`, `evaluateOralExam`,
+  `retryOralExamEvaluation`, `getOralExamSession`, `listOralExamSessions`, `abortOralExamSession`)
 - Typen: `OralExam*` in `types.ts`
 - Routen: `App.tsx` — `/oral-exam`, `/oral-exam/live`, `/oral-exam/results/:sessionId`,
   `/oral-exam/history`, **alle in `<AdminGuard>`**
@@ -136,7 +136,7 @@ Prüfer-Abschlusses zu testen. Mechanik:
 | Admin (`m.almajzoub1@gmail.com`) | Voller Zugriff, **Modus frei wählbar** (Free/Premium), unbegrenzt |
 | Alle anderen / ausgeloggt | Karte unsichtbar, `/oral-exam*` → Redirect, Backend `403` |
 
-## 6. Auswertungs-JSON (Gemini)
+## 6. Auswertungs-JSON (OpenAI)
 `{ overall_score_pct, passed, summary, topic_scores[{topic,score_pct,comment}],
 answer_evaluations[{question,candidate_answer,score_pct,verdict,recommendation}], strengths[], gaps[],
 model_answers[{scenario,musterantwort}], roter_faden[], next_step }`. Bestehensgrenze 50 %.
@@ -144,8 +144,23 @@ model_answers[{scenario,musterantwort}], roter_faden[], next_step }`. Bestehensg
 - `answer_evaluations`: **Pro-Antwort-Bewertung** — je Prüfer-Frage ein Score + `verdict`
   (`correct`/`partial`/`wrong`) + `recommendation` (nur bei partial/wrong).
 - `summary` und `answer_evaluations` liegen im `feedback`-JSON (keine Schemaänderung nötig).
+- Provider: `oral-exam-evaluation` nutzt `OPENAI_API_KEY` und optional `OPENAI_MODEL` (Default
+  `gpt-4.1`). Die Antwort wird per JSON Schema erzwungen.
 
-## 6a. Audio-Speicherung (serverseitig, 2026-06-18)
+## 6a. Fehlerhafte Auswertungen & Retry
+- Sobald `oral-exam-evaluation` ein Transkript bestimmen kann, speichert die Function es früh in
+  `oral_exam_sessions.transcript`. Erst danach startet die KI-Auswertung.
+- Scheitert die KI-Auswertung danach, wird die Session mit `status='evaluation_failed'`, `ended_at`,
+  `duration_s`, `transcript` und `feedback.error`/`feedback.retryable=true` gespeichert.
+- `OralExamResults` zeigt für `evaluation_failed` einen Fehlerzustand mit „Auswertung erneut versuchen“.
+  Der Retry nutzt das gespeicherte Transkript und ruft dieselbe idempotente Edge Function erneut auf.
+- Alte Fehlversuche aus der Gemini-Key-Störung haben teils kein gespeichertes Transkript und keine
+  `conversationId`; einige wurden durch den Client-Cleanup bereits als `aborted` markiert. Sie sind im
+  Verlauf sichtbar, können aber nur über „Neue Prüfung starten“ wiederholt werden.
+- `WrittenExamHistory` („Abgeschlossene Prüfungen“) zeigt mündliche `done`, `evaluation_failed`, `running`
+  und `aborted`-Sessions an, damit Auswertungsfehler nicht verschwinden.
+
+## 6b. Audio-Speicherung (serverseitig, 2026-06-18)
 - Nach der Auswertung holt `oral-exam-evaluation` das **vollständige Gesprächs-Audio** (Prüfer + Prüfling)
   von ElevenLabs: `GET /v1/convai/conversations/{conversationId}/audio` (`audio/mpeg`, verifiziert).
 - Ablage im **privaten** Bucket `oral-exam-audio`, Pfad `{user_id}/{sessionId}.mp3`; `audio_path` wird in

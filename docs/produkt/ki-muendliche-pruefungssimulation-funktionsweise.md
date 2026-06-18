@@ -20,13 +20,13 @@ last_verified: 2026-06-18
 ## 1. Was es ist (in einem Satz)
 
 Der Nutzer **spricht** mit einer KI-Prüfer-Stimme („Herr Müller"), die praxisnahe §34a-Fallbeispiele
-stellt und dynamisch nachfragt; danach bewertet ein zweites KI-Modell (Gemini) das Gesprächs-Transkript
+stellt und dynamisch nachfragt; danach bewertet ein zweites KI-Modell (OpenAI) das Gesprächs-Transkript
 und liefert Score, Pass/Fail (Grenze **50 %**), Themen-Scores, Stärken/Lücken, Musterantworten,
 „roter Faden" und den nächsten Übungsschritt.
 
 Zwei KI-Bausteine, klar getrennt:
 - **ElevenLabs Conversational AI** → führt das Live-Gespräch (Sprache rein/raus). Bewertet **nicht**.
-- **Google Gemini** (`gemini-2.5-flash`) → bewertet **nach** dem Gespräch das Transkript.
+- **OpenAI Responses API** (`OPENAI_MODEL`, Default `gpt-4.1`) → bewertet **nach** dem Gespräch das Transkript als Structured Output.
 
 ---
 
@@ -82,8 +82,10 @@ OralExamLive (@elevenlabs/react)
                                                  · Idempotenz-Check (schon done?)
                                                  · Transkript autoritativ holen ─▶ ElevenLabs
                                                    (Fallback: Client-Transkript)   conversations/{id}
-                                                 · Bewerten ───────────────────▶ Gemini 2.5-flash
-                                                 · in oral_exam_sessions schreiben (done)
+                                                · Transkript früh speichern
+                                                · Bewerten ───────────────────▶ OpenAI Responses API
+                                                · in oral_exam_sessions schreiben (done)
+                                                · bei KI-Fehler: evaluation_failed + Retry im Verlauf
      ◀── { result: {…Bewertung…} } ─────────────────────────────────────────┘
 
 OralExamResults  → liest result (aus Navigation-State) oder lädt Zeile per RLS aus DB
@@ -180,16 +182,22 @@ Datei: [`supabase/functions/oral-exam-evaluation/index.ts`](../../supabase/funct
 **Ablauf:**
 1. **Auth** (JWT) → kein Nutzer ⇒ `401`.
 2. **Idempotenz:** Ist die Session bereits `done`, wird das **vorhandene** Ergebnis zurückgegeben
-   (kein zweiter Gemini-Aufruf, keine Kosten).
+   (kein zweiter OpenAI-Aufruf, keine Kosten).
 3. **Transkript bestimmen:** zuerst **autoritativ von ElevenLabs** (`GET /v1/convai/conversations/{id}`,
-   bis zu 5 Versuche mit steigender Wartezeit, falls noch „processing"); Fallback = Client-Transkript. Leer ⇒ Fehler.
-4. **Bewertung (Gemini):** `gemini-2.5-flash`, `temperature 0.3`, `responseMimeType: application/json`,
-   `maxOutputTokens 8192`, alle Safety-Settings auf `BLOCK_NONE` (Prüfungsinhalte können Gewalt/Recht berühren).
-5. **Audio sichern (best-effort):** vollständiges Gesprächs-Audio von ElevenLabs
+   bis zu 5 Versuche mit steigender Wartezeit, falls noch „processing"); Fallback = Client-Transkript,
+   danach ggf. bereits gespeichertes Transkript. Leer ⇒ Fehler.
+4. **Transkript früh speichern:** Sobald ein Transkript vorhanden ist, wird es in `oral_exam_sessions.transcript`
+   gesichert. Dadurch kann eine spätere Provider-/JSON-Störung über die Ergebnisseite erneut ausgewertet werden.
+5. **Bewertung (OpenAI):** Responses API, `OPENAI_MODEL` (Default `gpt-4.1`), `temperature 0.3`,
+   `max_output_tokens 8192`, Structured Output per JSON Schema.
+6. **Audio sichern (best-effort):** vollständiges Gesprächs-Audio von ElevenLabs
    (`GET /v1/convai/conversations/{id}/audio`, `audio/mpeg`) → privater Bucket `oral-exam-audio`
    unter `{user_id}/{sessionId}.mp3`; Pfad in `audio_path`. Audio-Fehler lassen die Bewertung nicht scheitern.
-6. **Speichern:** `status='done'`, `ended_at`, `duration_s`, `transcript`, `overall_score_pct`,
+7. **Speichern:** `status='done'`, `ended_at`, `duration_s`, `transcript`, `overall_score_pct`,
    `passed`, `topic_scores`, `feedback` (inkl. `summary` + `answer_evaluations`), `audio_path` in `oral_exam_sessions`.
+8. **Fehler speichern:** Wenn die KI-Auswertung nach vorhandenem Transkript scheitert, wird
+   `status='evaluation_failed'` mit `feedback.error`/`feedback.retryable=true` gespeichert. Verlauf und
+   Ergebnisseite zeigen die Session als fehlgeschlagen und bieten „Auswertung erneut versuchen“ an.
 
 **Bewertungs-Maßstab (Prompt):** „erfahrener IHK-Prüfer", **fair, aber nach echten IHK-Maßstäben**.
 Bewertet **nicht nur Faktenwissen**, sondern auch **Praxis-Angemessenheit, Deeskalations-Haltung,
@@ -234,7 +242,7 @@ Migration: [`supabase/migrations/20260616175910_create_oral_exam_sessions.sql`](
 | `user_id` | uuid (FK → `auth.users`, NOT NULL) | Besitzer |
 | `mode` | text | `free_test_3q` \| `full_5min` |
 | `focus_topic` | text \| null | gewählter Schwerpunkt |
-| `status` | text (default `running`) | `running` \| `done` \| `aborted` |
+| `status` | text (default `running`) | `running` \| `done` \| `aborted` \| `evaluation_failed` |
 | `started_at` | timestamptz (default `now()`) | Start |
 | `ended_at` | timestamptz \| null | Ende |
 | `duration_s` | int \| null | Gesprächsdauer |
@@ -280,7 +288,7 @@ eingebaut und greift automatisch, sobald das Admin-Gate entfernt wird.
 |---|---|
 | [`src/components/pages/OralExamIntro.tsx`](../../src/components/pages/OralExamIntro.tsx) | Einstieg, Test-Modus-Wahl (Free/Premium), Start; behandelt `feature_not_available`/`paywallRequired` |
 | [`src/components/pages/OralExamLive.tsx`](../../src/components/pages/OralExamLive.tsx) | Live-Gespräch (ElevenLabs), Mikro, Timer, Transkript, Sprech-Animationen, `finish()` |
-| [`src/components/pages/OralExamResults.tsx`](../../src/components/pages/OralExamResults.tsx) | Auswertung (Score, KI-Zusammenfassung, Pro-Antwort-Bewertung, Audio-Player, Themen-Balken, Stärken/Lücken, Musterantworten, roter Faden) |
+| [`src/components/pages/OralExamResults.tsx`](../../src/components/pages/OralExamResults.tsx) | Auswertung (Score, KI-Zusammenfassung, Pro-Antwort-Bewertung, Audio-Player, Themen-Balken, Stärken/Lücken, Musterantworten, roter Faden) + Fehlerzustand mit Retry |
 | [`src/components/pages/OralExamHistory.tsx`](../../src/components/pages/OralExamHistory.tsx) | Verlauf der eigenen Durchläufe |
 | [`src/services/oralExam.ts`](../../src/services/oralExam.ts) | API: `startOralExamSession`, `evaluateOralExam`, `getOralExamSession`, `listOralExamSessions`, `abortOralExamSession`, `getOralExamAudioUrl` + Fehlerklassen |
 | [`src/types.ts`](../../src/types.ts) | `OralExam*`-Typen + `ORAL_EXAM_FOCUS_TOPICS` |
@@ -311,7 +319,8 @@ Dependency: `@elevenlabs/react` (Hook `useConversation` + `ConversationProvider`
 |---|---|---|
 | `ELEVENLABS_API_KEY` | beide oral-Functions | Signed URL holen / Transkript abrufen |
 | `ELEVENLABS_AGENT_ID` | `oral-exam-session` | welcher Agent (Herr Müller) |
-| `GOOGLE_AI_API_KEY` | `oral-exam-evaluation` | Gemini-Bewertung |
+| `OPENAI_API_KEY` | `oral-exam-evaluation` | OpenAI-Bewertung |
+| `OPENAI_MODEL` | `oral-exam-evaluation` | optional, Default `gpt-4.1` |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | beide | DB-Zugriff / Auth |
 | `ALLOWED_ORIGIN` | beide | CORS |
 
@@ -336,8 +345,8 @@ Status: live gesetzt und funktionsfähig (belegt durch erfolgreiche Session-Zeil
 | `paywallRequired` | Nicht-Premium nach Gratis-Test (öffentlicher Launch) |
 | Kein Ton / keine Verbindung | Mikro-Freigabe verweigert; `ELEVENLABS_*`-Secrets prüfen; `signedUrl` abgelaufen |
 | „Kein Transkript verfügbar" | Gespräch zu kurz / leer; ElevenLabs-Conversation noch nicht fertig (Retry greift) |
-| Auswertung schlägt fehl | `GOOGLE_AI_API_KEY` fehlt/ungültig; Gemini-Antwort kein valides JSON |
-| Session bleibt `running` | Abbruch ohne `finish()` → wird per `abortOralExamSession` auf `aborted` gesetzt |
+| Auswertung schlägt fehl | `OPENAI_API_KEY` fehlt/ungültig; OpenAI-Antwort nicht schema-valide; Session wird bei vorhandenem Transkript `evaluation_failed` |
+| Session bleibt `running` / `aborted` | Altfall oder Abbruch ohne erfolgreiche Auswertung → wird im Verlauf sichtbar; ohne gespeichertes Transkript ist nur „Neue Prüfung starten“ möglich |
 
 ---
 

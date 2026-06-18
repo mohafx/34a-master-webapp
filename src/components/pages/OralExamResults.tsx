@@ -3,11 +3,11 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
     ArrowLeft, Loader2, CheckCircle2, XCircle, Target, ThumbsUp,
     AlertCircle, BookOpen, Compass, ArrowRight, Mic, MessageSquare, Headphones,
-    Sparkles, MinusCircle,
+    Sparkles, MinusCircle, RefreshCw,
 } from 'lucide-react';
 import { usePostHog } from '../../contexts/PostHogProvider';
-import { getOralExamSession, getOralExamAudioUrl } from '../../services/oralExam';
-import type { OralExamEvaluation, OralExamAnswerEvaluation, OralExamAnswerVerdict } from '../../types';
+import { getOralExamSession, getOralExamAudioUrl, retryOralExamEvaluation } from '../../services/oralExam';
+import type { OralExamEvaluation, OralExamAnswerEvaluation, OralExamAnswerVerdict, OralExamSession } from '../../types';
 
 interface ResultsNavState {
     result?: OralExamEvaluation & { audio_path?: string | null };
@@ -54,7 +54,9 @@ export default function OralExamResults() {
     const [evaluation, setEvaluation] = useState<OralExamEvaluation | null>(navState.result ?? null);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [retrying, setRetrying] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [session, setSession] = useState<OralExamSession | null>(null);
     const trackedRef = useRef(false);
 
     // Lädt Bewertung (falls nicht im State) + Audio-URL (immer, via audio_path).
@@ -70,8 +72,16 @@ export default function OralExamResults() {
                     if (!cancelled) { setError('Auswertung nicht gefunden.'); setLoading(false); }
                     return;
                 }
+                if (!cancelled) setSession(session);
                 if (session.status !== 'done' || session.overall_score_pct == null) {
-                    if (!cancelled) { setError('Diese Prüfung wurde noch nicht ausgewertet.'); setLoading(false); }
+                    if (!cancelled) {
+                        setError(session.status === 'evaluation_failed'
+                            ? 'Die Auswertung dieser Prüfung ist fehlgeschlagen.'
+                            : session.status === 'aborted'
+                                ? 'Diese Prüfung wurde abgebrochen oder konnte nicht bis zur Auswertung abgeschlossen werden.'
+                            : 'Diese Prüfung wurde noch nicht ausgewertet.');
+                        setLoading(false);
+                    }
                     return;
                 }
                 evalData = {
@@ -100,6 +110,28 @@ export default function OralExamResults() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sessionId]);
 
+    const canRetryEvaluation = !!sessionId && !!session?.transcript?.length;
+    const handleRetryEvaluation = async () => {
+        if (!sessionId || retrying) return;
+        if (!canRetryEvaluation) {
+            navigate('/oral-exam');
+            return;
+        }
+        try {
+            setRetrying(true);
+            setError(null);
+            const result = await retryOralExamEvaluation(sessionId);
+            navigate(`/oral-exam/results/${sessionId}`, {
+                replace: true,
+                state: { result, mode: session?.mode },
+            });
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Auswertung konnte nicht erneut gestartet werden.');
+        } finally {
+            setRetrying(false);
+        }
+    };
+
     useEffect(() => {
         if (evaluation && !trackedRef.current) {
             trackedRef.current = true;
@@ -123,13 +155,29 @@ export default function OralExamResults() {
     if (error || !evaluation) {
         return (
             <div className="max-w-2xl mx-auto px-4 py-20 text-center">
-                <p className="text-slate-600 dark:text-slate-300 mb-8">{error ?? 'Keine Auswertung verfügbar.'}</p>
-                <button
-                    onClick={() => navigate('/oral-exam')}
-                    className="px-6 py-3 rounded-2xl bg-violet-600 text-white font-bold active:scale-95 transition-all"
-                >
-                    Zurück
-                </button>
+                <div className="w-16 h-16 rounded-2xl bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 flex items-center justify-center mx-auto mb-5">
+                    <AlertCircle size={32} />
+                </div>
+                <h1 className="font-black text-xl text-slate-900 dark:text-white mb-2">Auswertung fehlgeschlagen</h1>
+                <p className="text-slate-600 dark:text-slate-300 mb-8 text-sm">
+                    {error ?? 'Keine Auswertung verfügbar.'}
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <button
+                        onClick={handleRetryEvaluation}
+                        disabled={retrying}
+                        className="px-6 py-3 rounded-2xl bg-violet-600 text-white font-bold active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                    >
+                        {retrying ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+                        {canRetryEvaluation ? 'Auswertung erneut versuchen' : 'Neue Prüfung starten'}
+                    </button>
+                    <button
+                        onClick={() => navigate('/oral-exam/history')}
+                        className="px-6 py-3 rounded-2xl bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold active:scale-95 transition-all"
+                    >
+                        Verlauf
+                    </button>
+                </div>
             </div>
         );
     }

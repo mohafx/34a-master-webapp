@@ -86,7 +86,7 @@ export async function startOralExamSession(
 }
 
 /**
- * Lässt das Transkript serverseitig (Gemini) bewerten und speichert das Ergebnis.
+ * Lässt das Transkript serverseitig (OpenAI) bewerten und speichert das Ergebnis.
  * Idempotent: ist die Session bereits ausgewertet, kommt das vorhandene Ergebnis.
  */
 export async function evaluateOralExam(
@@ -109,6 +109,25 @@ export async function evaluateOralExam(
     }
 
     return data.result as OralExamEvaluation;
+}
+
+/**
+ * Versucht eine fehlgeschlagene Auswertung erneut. Das funktioniert nur, wenn
+ * die Edge Function beim ursprünglichen Versuch bereits ein Transkript speichern konnte.
+ */
+export async function retryOralExamEvaluation(sessionId: string): Promise<OralExamEvaluation> {
+    const session = await getOralExamSession(sessionId);
+    if (!session) {
+        throw new Error('Prüfung nicht gefunden.');
+    }
+    if (!Array.isArray(session.transcript) || session.transcript.length === 0) {
+        throw new Error('Für diese Prüfung ist kein Transkript gespeichert. Bitte starte eine neue Prüfung.');
+    }
+    return evaluateOralExam(
+        sessionId,
+        session.transcript,
+        session.duration_s ?? 0,
+    );
 }
 
 /** Lädt eine einzelne Session (RLS schützt → nur eigene Zeilen sichtbar). */

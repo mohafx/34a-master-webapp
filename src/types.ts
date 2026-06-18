@@ -178,7 +178,7 @@ export type WrittenExamTopic = keyof typeof TOPIC_DISTRIBUTION;
 // docs/produkt/ki-muendliche-pruefungssimulation-umsetzung.md
 
 export type OralExamMode = 'free_test_3q' | 'full_5min';
-export type OralExamStatus = 'running' | 'done' | 'aborted';
+export type OralExamStatus = 'running' | 'done' | 'aborted' | 'evaluation_failed';
 
 export interface OralExamTranscriptTurn {
   role: 'examiner' | 'candidate';
