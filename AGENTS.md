@@ -98,4 +98,6 @@ Verwandte menschorientierte Docs (Gesamtsystem, im Eltern-Ordner): `../docs/SYST
 - ✅ **`*" 2".tsx`-Duplikate** in `src/components/pages/` entfernt (`Dashboard 2`, `Profile 2`,
   `LessonQuiz 2` — waren tot, nirgends importiert).
 - ✅ **Root `README.md`** — tote `../docs/`-Links auf `AGENTS.md` / `docs/agents/` umgelenkt.
+- ✅ **Dev-Panel bereinigt (2026-06-18):** Die Sektion „Übergang testen“ (transition state testing) wurde aus dem Entwickler-Panel entfernt.
+- ✅ **Inhaltsfehler behoben (2026-06-18):** Finderlohn § 971 BGB auf `MULTIPLE_CHOICE` geändert, Geldbörsen-Fund im Park auf Antwort D geändert samt neuer Erklärung, Selbsthilfe-Aussagen auf `SINGLE_CHOICE` geändert.
 - ℹ️ **`.gitignore`** deckt `dist/`, `node_modules/` und `app-src/` bereits ab — keine Änderung nötig.
