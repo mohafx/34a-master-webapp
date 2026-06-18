@@ -19,15 +19,25 @@ const supabaseAdmin = createClient(
     { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
-async function callGemini(prompt: string, maxTokens = 4096): Promise<string | null> {
-    if (!GOOGLE_AI_API_KEY) return null;
+async function callGemini(prompt: string, maxTokens = 8192): Promise<string | null> {
+    if (!GOOGLE_AI_API_KEY) {
+        console.error("Gemini: GOOGLE_AI_API_KEY fehlt.");
+        return null;
+    }
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GOOGLE_AI_API_KEY}`;
     const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens, responseMimeType: "application/json" },
+            generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: maxTokens,
+                responseMimeType: "application/json",
+                // WICHTIG: "Thinking" deaktivieren — sonst verbraucht gemini-2.5-flash das
+                // Output-Token-Budget fürs Denken und liefert leeren/abgeschnittenen Text (MAX_TOKENS).
+                thinkingConfig: { thinkingBudget: 0 },
+            },
             safetySettings: [
                 { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
                 { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -37,11 +47,18 @@ async function callGemini(prompt: string, maxTokens = 4096): Promise<string | nu
         }),
     });
     if (!res.ok) {
-        console.error("Gemini error:", res.status, await res.text());
+        console.error("Gemini HTTP error:", res.status, await res.text());
         return null;
     }
     const data = await res.json();
-    return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+    const candidate = data?.candidates?.[0];
+    const text = candidate?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? null;
+    if (!text) {
+        // Diagnose: warum kam kein Text? (z. B. finishReason MAX_TOKENS / SAFETY)
+        console.error("Gemini lieferte keinen Text. finishReason:", candidate?.finishReason,
+            "promptFeedback:", JSON.stringify(data?.promptFeedback ?? {}));
+    }
+    return text;
 }
 
 function parseEvaluation(text: string): any {
