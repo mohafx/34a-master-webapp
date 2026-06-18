@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ConversationProvider, useConversation } from '@elevenlabs/react';
-import { Mic, MicOff, Loader2, PhoneOff, AlertTriangle } from 'lucide-react';
+import { Mic, MicOff, Loader2, PhoneOff, AlertTriangle, Volume2 } from 'lucide-react';
 import { evaluateOralExam, abortOralExamSession } from '../../services/oralExam';
 import type { OralExamTranscriptTurn } from '../../types';
 
@@ -50,6 +50,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [transcript, setTranscript] = useState<OralExamTranscriptTurn[]>([]);
     const [remaining, setRemaining] = useState(state.maxDurationSec);
+    const [inputLevel, setInputLevel] = useState(0);
 
     const conversationIdRef = useRef<string | undefined>(undefined);
     const transcriptRef = useRef<OralExamTranscriptTurn[]>([]);
@@ -134,6 +135,27 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         return () => clearTimeout(t);
     }, [phase, remaining, finish]);
 
+    // Mikrofon-Pegel des Nutzers pollen → treibt die "Du sprichst"-Animation.
+    useEffect(() => {
+        if (phase !== 'live') {
+            setInputLevel(0);
+            return;
+        }
+        let raf = 0;
+        const tick = () => {
+            try {
+                // 0..1; bei stummem Mikro 0. getInputVolume kann kurz nach Connect werfen → guard.
+                const v = conversation.getInputVolume?.() ?? 0;
+                setInputLevel(conversation.isMuted ? 0 : v);
+            } catch (_) {
+                /* noch nicht bereit */
+            }
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [phase, conversation]);
+
     // Cleanup beim Verlassen ohne Abschluss → Session abbrechen + trennen.
     useEffect(() => {
         return () => {
@@ -177,6 +199,10 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
 
     const isExaminerSpeaking = conversation.isSpeaking;
     const connecting = phase === 'permission' || phase === 'connecting';
+    // Nutzer spricht: nur wenn der Prüfer schweigt und genug Mikrofonpegel ankommt.
+    const userSpeaking = !connecting && !isExaminerSpeaking && !conversation.isMuted && inputLevel > 0.04;
+    // Pegel-getriebene Skalierung des Nutzer-Rings (gedeckelt, damit es nicht springt).
+    const userScale = 1 + Math.min(inputLevel * 2.2, 0.45);
 
     return (
         <div className="max-w-2xl mx-auto px-4 pb-32">
@@ -190,32 +216,53 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                         {formatTime(remaining)}
                     </div>
 
-                    {/* Avatar / Puls */}
-                    <div className="relative z-10 mb-6">
-                        <div
-                            className={`w-28 h-28 rounded-full flex items-center justify-center transition-all duration-300 ${isExaminerSpeaking
-                                ? 'bg-white/25 scale-110 shadow-2xl shadow-white/30'
-                                : 'bg-white/12'
-                                }`}
-                        >
-                            {connecting ? (
-                                <Loader2 size={44} className="animate-spin" />
-                            ) : (
-                                <Mic size={44} strokeWidth={2} className={isExaminerSpeaking ? 'animate-pulse' : ''} />
-                            )}
-                        </div>
+                    {/* Avatar / Animation */}
+                    <div className="relative z-10 mb-6 flex items-center justify-center w-32 h-32">
+                        {/* Nutzer-Sprech-Ring: pegelreaktiv (emerald) */}
+                        {userSpeaking && (
+                            <>
+                                <span
+                                    className="absolute rounded-full bg-emerald-400/20 transition-transform duration-75"
+                                    style={{ width: '8rem', height: '8rem', transform: `scale(${userScale})` }}
+                                />
+                                <span className="absolute inset-0 rounded-full border-2 border-emerald-300/50 animate-ping" />
+                            </>
+                        )}
+                        {/* Prüfer-Sprech-Ring (weiß) */}
                         {isExaminerSpeaking && (
                             <span className="absolute inset-0 rounded-full border-2 border-white/40 animate-ping" />
                         )}
+
+                        <div
+                            className={`w-28 h-28 rounded-full flex items-center justify-center transition-all duration-200 ${isExaminerSpeaking
+                                ? 'bg-white/25 scale-110 shadow-2xl shadow-white/30'
+                                : userSpeaking
+                                    ? 'bg-emerald-400/25 shadow-2xl shadow-emerald-400/30'
+                                    : 'bg-white/12'
+                                }`}
+                            style={userSpeaking ? { transform: `scale(${1 + Math.min(inputLevel * 0.8, 0.18)})` } : undefined}
+                        >
+                            {connecting ? (
+                                <Loader2 size={44} className="animate-spin" />
+                            ) : isExaminerSpeaking ? (
+                                <Volume2 size={44} strokeWidth={2} className="animate-pulse" />
+                            ) : (
+                                <Mic size={44} strokeWidth={2} className={userSpeaking ? 'text-emerald-50' : ''} />
+                            )}
+                        </div>
                     </div>
 
-                    <h1 className="font-black text-xl md:text-2xl relative z-10">Dr. Klaus Wagner</h1>
+                    <h1 className="font-black text-xl md:text-2xl relative z-10">Herr Müller</h1>
                     <p className="text-white/80 text-sm mt-1 relative z-10">
                         {connecting
                             ? 'Verbinde mit dem Prüfer…'
                             : isExaminerSpeaking
                                 ? 'Der Prüfer spricht…'
-                                : 'Du bist dran — sprich jetzt.'}
+                                : userSpeaking
+                                    ? 'Du sprichst…'
+                                    : conversation.isMuted
+                                        ? 'Mikrofon stumm'
+                                        : 'Du bist dran — sprich jetzt.'}
                     </p>
                 </div>
             </div>

@@ -90,9 +90,10 @@ Browser (React 19 SPA)
 - `migrations/20260616175910_create_oral_exam_sessions.sql` (idempotent, = Live-Schema)
 
 ## 4. ElevenLabs-Agent
-- „34a Master – Mündliche Prüfung (Dr. Klaus Wagner)", Sprache **de**, Modell `eleven_flash_v2_5`.
+- „34a Master – Mündliche Prüfung (**Herr Müller**)", Sprache **de**, Modell `eleven_flash_v2_5`.
 - `agent_id` liegt als Supabase-Secret `ELEVENLABS_AGENT_ID` (nicht im Repo).
 - Dynamic Variables: `mode`, `focus_topic`, `candidate_name`.
+- Prüfer-Name (im Prompt **und** in der UI [`OralExamLive.tsx`]) = **Herr Müller** (per API gesetzt 2026-06-18).
 
 ### 4a. Ein Agent, kein zweiter (Architekturentscheidung 2026-06-18)
 **Bewusst genau EIN Agent** statt getrennter Agenten für Abonnenten/Nicht-Abonnenten. Begründung:
@@ -114,10 +115,25 @@ Die `ENDE`-Sektion des System-Prompts verzweigt nach `{{mode}}`:
 - Im aktuellen Admin-Soft-Launch ist `mode` immer `full_5min` → der Premium-Hinweis greift erst nach
   dem öffentlichen Launch für Free-Nutzer.
 
+## 4c. Admin-Modus-Auswahl (Test, 2026-06-18)
+Im Admin-Soft-Launch kann der Admin vor dem Start in `OralExamIntro` den Test-Modus wählen
+(**Free** = `free_test_3q` / **Premium** = `full_5min`), um beide Abläufe inkl. des modus-abhängigen
+Prüfer-Abschlusses zu testen. Mechanik:
+- `startOralExamSession(focusTopic, requestedMode)` schickt `requested_mode` im Body.
+- `oral-exam-session` (v4) honoriert `requested_mode` **nur für Admins**; für alle anderen ergibt sich
+  der Modus weiterhin aus dem Premium-Status. Nach dem öffentlichen Launch ist das Feld für
+  Nicht-Admins wirkungslos (kein Missbrauch möglich).
+
+## 4d. Sprech-Animationen (UI, `OralExamLive.tsx`)
+- **Prüfer spricht** (`conversation.isSpeaking`): weißer Puls-Ring + `Volume2`-Icon.
+- **Nutzer spricht**: `getInputVolume()` wird per `requestAnimationFrame` gepollt; ab Pegel > 0,04
+  erscheint ein **pegelreaktiver emerald-Ring** (skaliert mit der Lautstärke) + Status „Du sprichst…".
+  Bei stummem Mikro 0 → Status „Mikrofon stumm".
+
 ## 5. Gating
 | Nutzer | Verhalten (Soft-Launch) |
 |---|---|
-| Admin (`m.almajzoub1@gmail.com`) | Voller Zugriff, `full_5min`, unbegrenzt |
+| Admin (`m.almajzoub1@gmail.com`) | Voller Zugriff, **Modus frei wählbar** (Free/Premium), unbegrenzt |
 | Alle anderen / ausgeloggt | Karte unsichtbar, `/oral-exam*` → Redirect, Backend `403` |
 
 ## 6. Auswertungs-JSON (Gemini)

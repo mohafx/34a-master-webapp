@@ -133,11 +133,17 @@ serve(async (req) => {
 
         const body = await req.json().catch(() => ({}));
         const focusTopic: string | null = body?.focus_topic ?? null;
+        // Admin-Test: erlaubt explizite Modus-Wahl (free_test_3q | full_5min), um beide Abläufe zu testen.
+        const requestedMode: string | null =
+            body?.requested_mode === "free_test_3q" || body?.requested_mode === "full_5min"
+                ? body.requested_mode
+                : null;
 
+        const admin = isAdminEmail(user.email);
         // Admin im Test = voller Modus & unbegrenzt. isUserPremium bleibt für den späteren öffentlichen Launch erhalten.
-        const premium = isAdminEmail(user.email) ? true : await isUserPremium(user.id);
+        const premium = admin ? true : await isUserPremium(user.id);
 
-        // Free-Gating: genau 1 abgeschlossener Gratis-Test
+        // Free-Gating: genau 1 abgeschlossener Gratis-Test (Admin ausgenommen, damit beide Modi testbar bleiben).
         if (!premium) {
             const { count } = await supabaseAdmin
                 .from("oral_exam_sessions")
@@ -153,8 +159,9 @@ serve(async (req) => {
             }
         }
 
-        const mode = premium ? "full_5min" : "free_test_3q";
-        const maxDurationSec = premium ? MAX_DURATION_FULL : MAX_DURATION_FREE;
+        // Admin darf den Modus explizit wählen; sonst ergibt er sich aus dem Premium-Status.
+        const mode = admin && requestedMode ? requestedMode : premium ? "full_5min" : "free_test_3q";
+        const maxDurationSec = mode === "full_5min" ? MAX_DURATION_FULL : MAX_DURATION_FREE;
 
         // Session anlegen
         const { data: session, error: insertError } = await supabaseAdmin

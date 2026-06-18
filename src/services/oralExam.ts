@@ -46,14 +46,20 @@ export class OralExamPaywallError extends Error {
 /**
  * Startet eine mündliche Prüfungssimulation. Legt serverseitig eine Session an
  * und liefert die ElevenLabs Signed URL + Dynamic Variables zurück.
+ * @param requestedMode optionaler Modus-Override — nur für Admins wirksam (Test beider Abläufe),
+ *   sonst ergibt sich der Modus serverseitig aus dem Premium-Status.
  * @throws OralExamFeatureUnavailableError wenn kein Admin (Soft-Launch-Gate)
  * @throws OralExamPaywallError wenn Free-Kontingent (1 Gratis-Test) aufgebraucht
  */
 export async function startOralExamSession(
-    focusTopic?: string | null
+    focusTopic?: string | null,
+    requestedMode?: 'free_test_3q' | 'full_5min' | null
 ): Promise<OralExamStartResponse> {
     const { data, error } = await supabase.functions.invoke('oral-exam-session', {
-        body: { focus_topic: focusTopic ?? null },
+        body: {
+            focus_topic: focusTopic ?? null,
+            requested_mode: requestedMode ?? null,
+        },
     });
 
     if (error) {

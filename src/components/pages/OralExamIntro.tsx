@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Mic, Loader2, Sparkles, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Mic, Loader2, Sparkles, ShieldCheck, Zap, Crown } from 'lucide-react';
 import { useApp } from '../../App';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import {
@@ -9,6 +9,8 @@ import {
     OralExamPaywallError,
 } from '../../services/oralExam';
 
+type TestMode = 'free_test_3q' | 'full_5min';
+
 export default function OralExamIntro() {
     const navigate = useNavigate();
     const { openPaywall } = useApp();
@@ -16,12 +18,13 @@ export default function OralExamIntro() {
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [selectedMode, setSelectedMode] = useState<TestMode>('full_5min');
 
     const handleStart = async () => {
         setLoading(true);
         setError(null);
         try {
-            const session = await startOralExamSession(null);
+            const session = await startOralExamSession(null, selectedMode);
             trackEvent('oral_exam_started', {
                 mode: session.mode,
                 topic: 'alle',
@@ -86,6 +89,34 @@ export default function OralExamIntro() {
                 <InfoChip icon={<ShieldCheck size={18} />} title="Ohne Konsequenzen" text="So oft du willst. Bestehensgrenze: 50 %." />
             </div>
 
+            {/* Modus-Auswahl (Admin-Test: beide Abläufe prüfbar) */}
+            <div className="mb-6">
+                <div className="flex items-center justify-between mb-2 px-1">
+                    <h3 className="font-black text-sm text-slate-900 dark:text-white uppercase tracking-tight">Test-Modus</h3>
+                    <span className="text-[10px] font-black uppercase tracking-wide bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300 px-2.5 py-1 rounded-full">
+                        Intern
+                    </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <ModeCard
+                        active={selectedMode === 'free_test_3q'}
+                        onClick={() => setSelectedMode('free_test_3q')}
+                        icon={<Zap size={20} strokeWidth={2.5} />}
+                        title="Free"
+                        subtitle="Mini · 3 Aufgaben"
+                        meta="max. 3 Min"
+                    />
+                    <ModeCard
+                        active={selectedMode === 'full_5min'}
+                        onClick={() => setSelectedMode('full_5min')}
+                        icon={<Crown size={20} strokeWidth={2.5} />}
+                        title="Premium"
+                        subtitle="Voll · mehrere Themen"
+                        meta="max. 5 Min"
+                    />
+                </div>
+            </div>
+
             {error && (
                 <div className="mb-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 text-sm font-medium">
                     {error}
@@ -113,6 +144,42 @@ export default function OralExamIntro() {
             </p>
 
         </div>
+    );
+}
+
+function ModeCard({
+    active,
+    onClick,
+    icon,
+    title,
+    subtitle,
+    meta,
+}: {
+    active: boolean;
+    onClick: () => void;
+    icon: React.ReactNode;
+    title: string;
+    subtitle: string;
+    meta: string;
+}) {
+    return (
+        <button
+            onClick={onClick}
+            className={`text-left rounded-2xl p-4 border-2 transition-all active:scale-[0.98] ${active
+                ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/20 shadow-md shadow-violet-500/10'
+                : 'border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
+                }`}
+        >
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-2 ${active
+                ? 'bg-violet-600 text-white'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
+                }`}>
+                {icon}
+            </div>
+            <h4 className="font-black text-base text-slate-900 dark:text-white">{title}</h4>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{subtitle}</p>
+            <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-1">{meta}</p>
+        </button>
     );
 }
 
