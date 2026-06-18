@@ -1,5 +1,5 @@
-import { Bug, CheckCircle2, Crown, LogIn, LogOut, RefreshCw, Rocket, Sparkles, Timer, X } from 'lucide-react';
-import { useDevPanel, type DevAccountState, type DevShortcutId, type DevTransitionState } from '../../devpanel/DevPanelContext';
+import { Bug, CheckCircle2, Crown, LogIn, LogOut, Rocket, Sparkles, X } from 'lucide-react';
+import { useDevPanel, type DevAccountState, type DevShortcutId } from '../../devpanel/DevPanelContext';
 
 const stateButtons: Array<{
   id: DevAccountState;
@@ -22,16 +22,6 @@ const shortcuts: Array<{
   { id: 'lernplan', label: 'Lernplan öffnen' },
 ];
 
-const transitionStates: Array<{
-  id: DevTransitionState;
-  label: string;
-}> = [
-  { id: 'none', label: 'Kein Übergang' },
-  { id: 'active_7_days', label: 'Aktiv: 7 Tage Rest' },
-  { id: 'active_2_days', label: 'Aktiv: 2 Tage Rest' },
-  { id: 'active_last_day', label: 'Aktiv: letzter Tag' },
-  { id: 'expired', label: 'Abgelaufen' },
-];
 
 export function LocalDevPanel() {
   const {
@@ -42,9 +32,6 @@ export function LocalDevPanel() {
     setOverrideState,
     clearOverrideState,
     openShortcut,
-    transitionState,
-    setTransitionState,
-    replayTransitionNotice,
   } = useDevPanel();
 
   if (!enabled) return null;
@@ -118,39 +105,6 @@ export function LocalDevPanel() {
             </button>
           </div>
 
-          <div className="mb-4">
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              Übergang testen
-            </p>
-            <div className="grid grid-cols-1 gap-2">
-              {transitionStates.map(({ id, label }) => {
-                const isActive = transitionState === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setTransitionState(id)}
-                    className={`inline-flex items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
-                      isActive
-                        ? 'border-amber-500 bg-amber-50 text-amber-800 dark:border-amber-400 dark:bg-amber-500/15 dark:text-amber-100'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span>{label}</span>
-                    <Timer size={16} />
-                  </button>
-                );
-              })}
-            </div>
-            <button
-              type="button"
-              onClick={replayTransitionNotice}
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-amber-300 px-4 py-3 text-sm font-semibold text-amber-700 transition hover:bg-amber-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-900/20"
-            >
-              <RefreshCw size={15} />
-              Meldung erneut anzeigen
-            </button>
-          </div>
 
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
