@@ -58,10 +58,10 @@ function parseEvaluation(text: string): any {
     return null;
 }
 
-// Holt das authoritative Transkript direkt von ElevenLabs (kurze Retries, falls noch "processing").
+// Holt das authoritative Transkript direkt von ElevenLabs (Retries, falls noch "processing").
 async function fetchElevenLabsTranscript(conversationId?: string): Promise<{ role: "examiner" | "candidate"; text: string }[] | null> {
     if (!ELEVENLABS_API_KEY || !conversationId) return null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
         try {
             const res = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`, {
                 headers: { "xi-api-key": ELEVENLABS_API_KEY },
@@ -78,9 +78,44 @@ async function fetchElevenLabsTranscript(conversationId?: string): Promise<{ rol
                 if (turns.length > 0) return turns;
             }
         } catch (_) { /* retry */ }
-        await new Promise((r) => setTimeout(r, 1500));
+        // Steigende Wartezeit: 1s, 2s, 3s, 4s, 5s — ElevenLabs braucht nach Gesprächsende kurz zum Verarbeiten.
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
     }
     return null;
+}
+
+// Holt das vollständige Gesprächs-Audio (Prüfer + Prüfling) von ElevenLabs und legt es
+// im privaten Bucket oral-exam-audio ab. Best-effort: Fehler dürfen die Auswertung NICHT scheitern lassen.
+async function storeConversationAudio(
+    conversationId: string | undefined,
+    userId: string,
+    sessionId: string,
+): Promise<string | null> {
+    if (!ELEVENLABS_API_KEY || !conversationId) return null;
+    try {
+        const res = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${conversationId}/audio`, {
+            headers: { "xi-api-key": ELEVENLABS_API_KEY },
+        });
+        if (!res.ok) {
+            console.error("ElevenLabs audio fetch failed:", res.status);
+            return null;
+        }
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (bytes.length === 0) return null;
+
+        const path = `${userId}/${sessionId}.mp3`;
+        const { error } = await supabaseAdmin.storage
+            .from("oral-exam-audio")
+            .upload(path, bytes, { contentType: "audio/mpeg", upsert: true });
+        if (error) {
+            console.error("Audio upload failed:", error.message);
+            return null;
+        }
+        return path;
+    } catch (e: any) {
+        console.error("storeConversationAudio error:", e?.message);
+        return null;
+    }
 }
 
 serve(async (req) => {
@@ -109,13 +144,13 @@ serve(async (req) => {
         // Idempotenz: bereits ausgewertet? → vorhandenes Ergebnis zurückgeben (kein Doppel-Gemini).
         const { data: existing } = await supabaseAdmin
             .from("oral_exam_sessions")
-            .select("status, overall_score_pct, passed, topic_scores, feedback")
+            .select("status, overall_score_pct, passed, topic_scores, feedback, audio_path")
             .eq("id", sessionId)
             .eq("user_id", user.id)
             .maybeSingle();
         if (existing?.status === "done") {
             return new Response(
-                JSON.stringify({ result: { overall_score_pct: existing.overall_score_pct, passed: existing.passed, topic_scores: existing.topic_scores, ...(existing.feedback || {}) } }),
+                JSON.stringify({ result: { overall_score_pct: existing.overall_score_pct, passed: existing.passed, topic_scores: existing.topic_scores, audio_path: existing.audio_path, ...(existing.feedback || {}) } }),
                 { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
             );
         }
@@ -145,7 +180,9 @@ serve(async (req) => {
             '{',
             '  "overall_score_pct": <0-100 Ganzzahl>,',
             '  "passed": <true wenn overall_score_pct >= 50, sonst false>,',
+            '  "summary": "<2-4 Sätze: wie die Prüfung lief, ob bestanden und warum, wo die Hauptschwächen liegen>",',
             '  "topic_scores": [{ "topic": "<Themengebiet>", "score_pct": <0-100>, "comment": "<1 Satz>" }],',
+            '  "answer_evaluations": [{ "question": "<Frage/Szenario des Prüfers>", "candidate_answer": "<kurze Zusammenfassung der Antwort des Prüflings>", "score_pct": <0-100>, "verdict": "correct|partial|wrong", "recommendation": "<bei partial/wrong: konkrete Verbesserung; bei correct: leerer String>" }],',
             '  "strengths": ["<kurzer Stichpunkt>"],',
             '  "gaps": ["<was gefehlt hat>"],',
             '  "model_answers": [{ "scenario": "<Szenario/Frage>", "musterantwort": "<ideale Antwort>" }],',
@@ -154,13 +191,16 @@ serve(async (req) => {
             '}',
             "",
             "REGELN:",
+            "- answer_evaluations: GENAU eine Zeile pro echter Frage des Prüfers, die der Prüfling beantwortet hat (in Reihenfolge des Gesprächs).",
+            "- verdict='correct' nur bei fachlich richtiger, ausreichender Antwort; 'partial' bei teilweise richtig/unvollständig; 'wrong' bei falsch oder keine Antwort.",
+            "- recommendation NUR bei verdict 'partial' oder 'wrong' füllen, sonst leerer String.",
             "- Nutze nur Themengebiete, die im Transkript tatsächlich vorkamen.",
             "- Bleibe juristisch korrekt; erfinde keine falschen Rechtsgrundlagen.",
             "- Wenn der Prüfling kaum etwas gesagt hat, vergib einen niedrigen Score und erkläre es in gaps.",
             "- passed MUSS konsistent mit overall_score_pct sein (>= 50 => true).",
         ].join("\n");
 
-        const text = await callGemini(prompt, 4096);
+        const text = await callGemini(prompt, 8192);
         const evaluation = text ? parseEvaluation(text) : null;
 
         if (!evaluation || typeof evaluation.overall_score_pct !== "number") {
@@ -169,6 +209,19 @@ serve(async (req) => {
 
         const overall = Math.max(0, Math.min(100, Math.round(evaluation.overall_score_pct)));
         const passed = overall >= 50;
+
+        // Vollständiges Gesprächs-Audio sichern (best-effort; blockiert die Auswertung nicht).
+        const audioPath = await storeConversationAudio(conversationId, user.id, sessionId);
+
+        const feedback = {
+            summary: typeof evaluation.summary === "string" ? evaluation.summary : "",
+            strengths: evaluation.strengths ?? [],
+            gaps: evaluation.gaps ?? [],
+            answer_evaluations: Array.isArray(evaluation.answer_evaluations) ? evaluation.answer_evaluations : [],
+            model_answers: evaluation.model_answers ?? [],
+            roter_faden: evaluation.roter_faden ?? [],
+            next_step: evaluation.next_step ?? "",
+        };
 
         const { error: updateError } = await supabaseAdmin
             .from("oral_exam_sessions")
@@ -180,13 +233,8 @@ serve(async (req) => {
                 overall_score_pct: overall,
                 passed,
                 topic_scores: Array.isArray(evaluation.topic_scores) ? evaluation.topic_scores : [],
-                feedback: {
-                    strengths: evaluation.strengths ?? [],
-                    gaps: evaluation.gaps ?? [],
-                    model_answers: evaluation.model_answers ?? [],
-                    roter_faden: evaluation.roter_faden ?? [],
-                    next_step: evaluation.next_step ?? "",
-                },
+                feedback,
+                audio_path: audioPath,
             })
             .eq("id", sessionId)
             .eq("user_id", user.id);
@@ -197,7 +245,7 @@ serve(async (req) => {
         }
 
         return new Response(
-            JSON.stringify({ result: { ...evaluation, overall_score_pct: overall, passed } }),
+            JSON.stringify({ result: { ...evaluation, ...feedback, overall_score_pct: overall, passed, audio_path: audioPath } }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
     } catch (error: any) {

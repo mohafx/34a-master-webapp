@@ -1,7 +1,7 @@
 ---
 title: Datenmodell
 scope: Supabase-Tabellen, types.ts, Preview-Views, RLS
-last_verified: 2026-06-15
+last_verified: 2026-06-18
 ---
 
 # Datenmodell
@@ -28,12 +28,27 @@ Aus `src/services/database.ts` (`supabase.from('…')`) referenziert:
 | `user_lernplans` | Generierte Lernpläne (siehe `lernplanGenerator.ts`) |
 | `written_exam_questions` | Fragen der schriftlichen Prüfung |
 | `written_exam_sessions` | Prüfungs-Sessions/Versuche |
-| `oral_exam_sessions` | Mündliche Prüfungssimulation: Sessions, Transkript & KI-Bewertung (RLS: nur eigene Zeilen). Details: [../produkt/ki-muendliche-pruefungssimulation-funktionsweise.md](../produkt/ki-muendliche-pruefungssimulation-funktionsweise.md) |
+| `oral_exam_sessions` | Mündliche Prüfungssimulation: Sessions, Transkript, KI-Bewertung (inkl. `summary`/`answer_evaluations` im `feedback`-JSON) & `audio_path` (RLS: nur eigene Zeilen). Audio im privaten Storage-Bucket `oral-exam-audio` (RLS: nur eigener Ordner). Details: [../produkt/ki-muendliche-pruefungssimulation-funktionsweise.md](../produkt/ki-muendliche-pruefungssimulation-funktionsweise.md) |
 | `waitlist` | Warteliste / Lead-Capture |
 
 > Die `_preview`-Tabellen/Views liefern öffentlich sichtbare Inhalte (Free-Tier); die vollständigen
 > `questions`/`flashcards` sind über RLS bzw. Premium-Logik geschützt. Vor Annahmen über
 > Sichtbarkeit immer die zugehörige Migration prüfen.
+
+### Erklärungsgrafiken für Quizfragen
+
+`questions` kann optional eine Erklärungsgrafik anzeigen. Die Felder wurden für den schrittweisen
+Rollout der Infografiken ergänzt:
+
+| Spalte | Zweck |
+|--------|-------|
+| `question_explanation_image_url` | Öffentliche Asset-URL, die oberhalb der Erklärung gerendert wird |
+| `question_explanation_image_alt_de` | Deutscher Alt-Text für Barrierefreiheit und Kontext |
+| `question_explanation_image_prompt` | Prompt-/Quellnotiz zur Nachvollziehbarkeit der Bildgenerierung |
+
+Die App mappt diese Felder auf `Question.explanationImageUrl` und `Question.explanationImageAltDE`.
+Die Anzeige passiert zentral in `src/components/pages/ExplanationRenderer.tsx`. Aktuelle Projekt-Doku
+und Status: [`../produkt/quiz-erklaerungsbilder-rollout.md`](../produkt/quiz-erklaerungsbilder-rollout.md).
 
 ## Typen (`src/types.ts`)
 
@@ -57,3 +72,4 @@ Zentrale exportierte Typen:
 
 - Schriftliche-Prüfung-Logik: `src/services/writtenExam.ts`, [05-payments-stripe.md](05-payments-stripe.md) (Gating).
 - Inhalts-Regeneration (Fragen/Erklärungen): [06-skripte-und-pipelines.md](06-skripte-und-pipelines.md).
+- Erklärungsgrafiken für Quizfragen: [../produkt/quiz-erklaerungsbilder-rollout.md](../produkt/quiz-erklaerungsbilder-rollout.md).

@@ -1,15 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
     ArrowLeft, Loader2, CheckCircle2, XCircle, Target, ThumbsUp,
-    AlertCircle, BookOpen, Compass, ArrowRight, Mic,
+    AlertCircle, BookOpen, Compass, ArrowRight, Mic, MessageSquare, Headphones,
+    Sparkles, MinusCircle,
 } from 'lucide-react';
 import { usePostHog } from '../../contexts/PostHogProvider';
-import { getOralExamSession } from '../../services/oralExam';
-import type { OralExamEvaluation } from '../../types';
+import { getOralExamSession, getOralExamAudioUrl } from '../../services/oralExam';
+import type { OralExamEvaluation, OralExamAnswerEvaluation, OralExamAnswerVerdict } from '../../types';
 
 interface ResultsNavState {
-    result?: OralExamEvaluation;
+    result?: OralExamEvaluation & { audio_path?: string | null };
     mode?: string;
 }
 
@@ -25,6 +26,24 @@ function barColor(pct: number): string {
     return 'bg-red-500';
 }
 
+const VERDICT_META: Record<OralExamAnswerVerdict, { label: string; icon: React.ReactNode; badge: string }> = {
+    correct: {
+        label: 'Richtig',
+        icon: <CheckCircle2 size={15} />,
+        badge: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+    },
+    partial: {
+        label: 'Teilweise',
+        icon: <MinusCircle size={15} />,
+        badge: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+    },
+    wrong: {
+        label: 'Falsch',
+        icon: <XCircle size={15} />,
+        badge: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+    },
+};
+
 export default function OralExamResults() {
     const navigate = useNavigate();
     const { sessionId } = useParams<{ sessionId: string }>();
@@ -33,33 +52,53 @@ export default function OralExamResults() {
     const { trackEvent } = usePostHog();
 
     const [evaluation, setEvaluation] = useState<OralExamEvaluation | null>(navState.result ?? null);
-    const [loading, setLoading] = useState(!navState.result);
+    const [audioUrl, setAudioUrl] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const trackedRef = useRef(false);
 
+    // Lädt Bewertung (falls nicht im State) + Audio-URL (immer, via audio_path).
     useEffect(() => {
-        if (evaluation || !sessionId) return;
+        let cancelled = false;
         (async () => {
-            const session = await getOralExamSession(sessionId);
-            if (!session) {
-                setError('Auswertung nicht gefunden.');
-            } else if (session.status !== 'done' || session.overall_score_pct == null) {
-                setError('Diese Prüfung wurde noch nicht ausgewertet.');
-            } else {
-                setEvaluation({
+            let evalData = navState.result ?? null;
+            let audioPath: string | null = navState.result?.audio_path ?? null;
+
+            if (!evalData && sessionId) {
+                const session = await getOralExamSession(sessionId);
+                if (!session) {
+                    if (!cancelled) { setError('Auswertung nicht gefunden.'); setLoading(false); }
+                    return;
+                }
+                if (session.status !== 'done' || session.overall_score_pct == null) {
+                    if (!cancelled) { setError('Diese Prüfung wurde noch nicht ausgewertet.'); setLoading(false); }
+                    return;
+                }
+                evalData = {
                     overall_score_pct: session.overall_score_pct,
                     passed: session.passed ?? session.overall_score_pct >= 50,
+                    summary: session.feedback?.summary ?? '',
                     topic_scores: session.topic_scores ?? [],
+                    answer_evaluations: session.feedback?.answer_evaluations ?? [],
                     strengths: session.feedback?.strengths ?? [],
                     gaps: session.feedback?.gaps ?? [],
                     model_answers: session.feedback?.model_answers ?? [],
                     roter_faden: session.feedback?.roter_faden ?? [],
                     next_step: session.feedback?.next_step ?? '',
-                });
+                };
+                audioPath = session.audio_path;
+                if (!cancelled) setEvaluation(evalData);
             }
-            setLoading(false);
+
+            if (audioPath) {
+                const url = await getOralExamAudioUrl(audioPath);
+                if (!cancelled) setAudioUrl(url);
+            }
+            if (!cancelled) setLoading(false);
         })();
-    }, [evaluation, sessionId]);
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sessionId]);
 
     useEffect(() => {
         if (evaluation && !trackedRef.current) {
@@ -95,7 +134,11 @@ export default function OralExamResults() {
         );
     }
 
-    const { overall_score_pct, passed, topic_scores, strengths, gaps, model_answers, roter_faden, next_step } = evaluation;
+    const {
+        overall_score_pct, passed, summary, topic_scores, answer_evaluations,
+        strengths, gaps, model_answers, roter_faden, next_step,
+    } = evaluation;
+    const answers = answer_evaluations ?? [];
 
     return (
         <div className="max-w-3xl mx-auto px-4 pb-32">
@@ -123,6 +166,40 @@ export default function OralExamResults() {
                     </div>
                 </div>
             </div>
+
+            {/* KI-Zusammenfassung */}
+            {summary && (
+                <div className="rounded-[24px] p-5 md:p-6 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 mb-4 flex gap-3">
+                    <span className="w-9 h-9 rounded-xl bg-violet-600 text-white flex items-center justify-center flex-shrink-0">
+                        <Sparkles size={18} />
+                    </span>
+                    <div>
+                        <h2 className="font-black text-base text-violet-900 dark:text-violet-200 mb-1">Zusammenfassung des Prüfers</h2>
+                        <p className="text-sm text-violet-900/90 dark:text-violet-200/90 leading-relaxed">{summary}</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Audio-Wiedergabe */}
+            {audioUrl && (
+                <Section icon={<Headphones size={18} />} title="Gespräch anhören">
+                    <audio controls src={audioUrl} className="w-full" preload="none">
+                        Dein Browser unterstützt keine Audio-Wiedergabe.
+                    </audio>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">Vollständige Aufnahme deiner Prüfung (Prüfer + du).</p>
+                </Section>
+            )}
+
+            {/* Pro-Antwort-Bewertung */}
+            {answers.length > 0 && (
+                <Section icon={<MessageSquare size={18} />} title="Deine Antworten im Detail">
+                    <div className="space-y-4">
+                        {answers.map((a, i) => (
+                            <AnswerCard key={i} a={a} index={i} />
+                        ))}
+                    </div>
+                </Section>
+            )}
 
             {/* Themen-Scores */}
             {topic_scores.length > 0 && (
@@ -207,6 +284,39 @@ export default function OralExamResults() {
                     Verlauf ansehen
                 </button>
             </div>
+        </div>
+    );
+}
+
+function AnswerCard({ a, index }: { a: OralExamAnswerEvaluation; index: number }) {
+    const meta = VERDICT_META[a.verdict] ?? VERDICT_META.partial;
+    return (
+        <div className="rounded-2xl border border-slate-100 dark:border-slate-700 p-4">
+            <div className="flex items-start justify-between gap-3 mb-2">
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">
+                    <span className="text-slate-400 dark:text-slate-500 mr-1">{index + 1}.</span>{a.question}
+                </p>
+                <span className={`inline-flex items-center gap-1 text-[11px] font-black px-2 py-1 rounded-full whitespace-nowrap ${meta.badge}`}>
+                    {meta.icon} {meta.label}
+                </span>
+            </div>
+            {a.candidate_answer && (
+                <p className="text-sm text-slate-600 dark:text-slate-300 mb-2">
+                    <span className="font-semibold text-slate-500 dark:text-slate-400">Deine Antwort: </span>{a.candidate_answer}
+                </p>
+            )}
+            <div className="flex items-center gap-2 mb-1">
+                <div className="flex-1 h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${barColor(a.score_pct)}`} style={{ width: `${Math.max(0, Math.min(100, a.score_pct))}%` }} />
+                </div>
+                <span className={`text-xs font-black ${scoreColor(a.score_pct)}`}>{a.score_pct}%</span>
+            </div>
+            {a.recommendation && a.verdict !== 'correct' && (
+                <div className="mt-2 flex gap-2 text-sm text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-3 py-2">
+                    <ArrowRight size={16} className="flex-shrink-0 mt-0.5 text-amber-600 dark:text-amber-300" />
+                    <span>{a.recommendation}</span>
+                </div>
+            )}
         </div>
     );
 }

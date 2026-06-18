@@ -137,8 +137,22 @@ Prüfer-Abschlusses zu testen. Mechanik:
 | Alle anderen / ausgeloggt | Karte unsichtbar, `/oral-exam*` → Redirect, Backend `403` |
 
 ## 6. Auswertungs-JSON (Gemini)
-`{ overall_score_pct, passed, topic_scores[{topic,score_pct,comment}], strengths[], gaps[],
+`{ overall_score_pct, passed, summary, topic_scores[{topic,score_pct,comment}],
+answer_evaluations[{question,candidate_answer,score_pct,verdict,recommendation}], strengths[], gaps[],
 model_answers[{scenario,musterantwort}], roter_faden[], next_step }`. Bestehensgrenze 50 %.
+- `summary`: KI-Gesamt-Zusammenfassung (wie die Prüfung lief, bestanden/nicht, Hauptschwächen).
+- `answer_evaluations`: **Pro-Antwort-Bewertung** — je Prüfer-Frage ein Score + `verdict`
+  (`correct`/`partial`/`wrong`) + `recommendation` (nur bei partial/wrong).
+- `summary` und `answer_evaluations` liegen im `feedback`-JSON (keine Schemaänderung nötig).
+
+## 6a. Audio-Speicherung (serverseitig, 2026-06-18)
+- Nach der Auswertung holt `oral-exam-evaluation` das **vollständige Gesprächs-Audio** (Prüfer + Prüfling)
+  von ElevenLabs: `GET /v1/convai/conversations/{conversationId}/audio` (`audio/mpeg`, verifiziert).
+- Ablage im **privaten** Bucket `oral-exam-audio`, Pfad `{user_id}/{sessionId}.mp3`; `audio_path` wird in
+  der Session gespeichert. Best-effort: Audio-Fehler lassen die Auswertung nicht scheitern.
+- Wiedergabe: `getOralExamAudioUrl()` (Service) erzeugt eine **signierte URL** (1 h); RLS-Policy
+  `oral_exam_audio_read_own` erlaubt nur den eigenen Ordner. Player auf der Ergebnisseite.
+- Migration: `supabase/migrations/20260618210000_oral_exam_audio.sql` (Spalte `audio_path` + Bucket + RLS).
 
 ## 7. Offene Schritte
 - **Phase 3:** Lokaler Live-Test als Admin (localhost, Mikrofon). Logs via Supabase-MCP `get_logs`

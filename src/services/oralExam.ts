@@ -126,6 +126,23 @@ export async function getOralExamSession(sessionId: string): Promise<OralExamSes
     return (data as OralExamSession) ?? null;
 }
 
+/**
+ * Erzeugt eine signierte URL (1 h gültig) für das gespeicherte Gesprächs-Audio.
+ * Bucket ist privat; RLS erlaubt nur den eigenen Ordner. Gibt null zurück, wenn
+ * kein Audio vorhanden ist oder die URL nicht erstellt werden kann.
+ */
+export async function getOralExamAudioUrl(audioPath?: string | null): Promise<string | null> {
+    if (!audioPath) return null;
+    const { data, error } = await supabase.storage
+        .from('oral-exam-audio')
+        .createSignedUrl(audioPath, 3600);
+    if (error) {
+        console.error('getOralExamAudioUrl error:', error.message);
+        return null;
+    }
+    return data?.signedUrl ?? null;
+}
+
 /** Listet die eigenen Sessions, neueste zuerst. */
 export async function listOralExamSessions(limit = 20): Promise<OralExamSession[]> {
     const { data, error } = await supabase

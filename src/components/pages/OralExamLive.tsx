@@ -88,7 +88,11 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                 state: { result, mode: state.mode },
             });
         } catch (err) {
-            setErrorMsg(err instanceof Error ? err.message : 'Auswertung fehlgeschlagen.');
+            const raw = err instanceof Error ? err.message : '';
+            const friendly = raw.includes('Transkript')
+                ? 'Es wurde kein Gespräch aufgezeichnet. Sprich bitte mit dem Prüfer und beende die Prüfung erst danach.'
+                : raw || 'Auswertung fehlgeschlagen.';
+            setErrorMsg(friendly);
             setPhase('error');
             finishingRef.current = false;
         }
@@ -192,7 +196,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             <div className="max-w-2xl mx-auto px-4 py-20 text-center">
                 <Loader2 size={40} className="animate-spin text-violet-600 mx-auto mb-6" />
                 <h1 className="font-black text-xl text-slate-900 dark:text-white mb-2">Auswertung läuft…</h1>
-                <p className="text-slate-500 dark:text-slate-400 text-sm">Dein Gespräch wird von der KI bewertet. Einen Moment.</p>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">Dein Gespräch wird von der KI bewertet und die Aufnahme gespeichert. Das dauert einen Moment.</p>
             </div>
         );
     }

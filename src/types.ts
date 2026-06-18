@@ -34,6 +34,8 @@ export interface Question {
   answers: Answer[];
   explanationDE: string;
   explanationAR?: string;
+  explanationImageUrl?: string;
+  explanationImageAltDE?: string;
   difficulty?: 'easy' | 'medium' | 'hard';
   orderIndex?: number;
   global_order_index?: number;
@@ -194,9 +196,21 @@ export interface OralExamModelAnswer {
   musterantwort: string;
 }
 
+// KI-Bewertung einer einzelnen Antwort des Prüflings.
+export type OralExamAnswerVerdict = 'correct' | 'partial' | 'wrong';
+export interface OralExamAnswerEvaluation {
+  question: string;
+  candidate_answer: string;
+  score_pct: number;
+  verdict: OralExamAnswerVerdict;
+  recommendation?: string; // nur bei partial/wrong gefüllt
+}
+
 export interface OralExamFeedback {
+  summary?: string; // KI-Gesamt-Zusammenfassung der Prüfung
   strengths: string[];
   gaps: string[];
+  answer_evaluations?: OralExamAnswerEvaluation[];
   model_answers: OralExamModelAnswer[];
   roter_faden: string[];
   next_step: string;
@@ -224,6 +238,7 @@ export interface OralExamSession {
   passed: boolean | null;
   topic_scores: OralExamTopicScore[] | null;
   feedback: OralExamFeedback | null;
+  audio_path: string | null;
   created_at: string;
 }
 
