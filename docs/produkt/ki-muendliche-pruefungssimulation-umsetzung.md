@@ -94,6 +94,26 @@ Browser (React 19 SPA)
 - `agent_id` liegt als Supabase-Secret `ELEVENLABS_AGENT_ID` (nicht im Repo).
 - Dynamic Variables: `mode`, `focus_topic`, `candidate_name`.
 
+### 4a. Ein Agent, kein zweiter (Architekturentscheidung 2026-06-18)
+**Bewusst genau EIN Agent** statt getrennter Agenten für Abonnenten/Nicht-Abonnenten. Begründung:
+der einzige Verhaltensunterschied ist der Schlusssatz — das löst die bereits übergebene
+Dynamic-Variable `{{mode}}` (`free_test_3q` vs. `full_5min`) im System-Prompt. Zwei Agenten würden
+jede künftige Prompt-/Persona-Verbesserung verdoppeln (Drift-Gefahr) und eine zweite `agent_id`
+erfordern. Erst splitten, falls die Modi inhaltlich stark auseinanderlaufen (anderer
+Schwierigkeitsgrad/Themen-Tiefe).
+
+### 4b. Modus-abhängiger Abschluss (im ElevenLabs-Prompt, per API gesetzt 2026-06-18)
+Die `ENDE`-Sektion des System-Prompts verzweigt nach `{{mode}}`:
+- `full_5min`: neutraler Abschluss („…Prüfung ist hiermit beendet. Ihre Auswertung folgt gleich.").
+- `free_test_3q`: zusätzlich ein **seriöser Premium-Hinweis** des Prüfers — die Mini-Simulation sei
+  nur ein verkürzter Eindruck; die vollständige Simulation (volle Länge, mehrere Fallbeispiele, tiefe
+  Rückfragen) sei Teil von **34a Master Premium**. Keine Bewertung/Note.
+- Der Prompt liegt **nur bei ElevenLabs** (nicht im Repo). Änderungen via
+  `PATCH /v1/convai/agents/{agent_id}` mit `conversation_config.agent.prompt.prompt` und dem
+  `xi-api-key` (= Secret `ELEVENLABS_API_KEY`, nie committen).
+- Im aktuellen Admin-Soft-Launch ist `mode` immer `full_5min` → der Premium-Hinweis greift erst nach
+  dem öffentlichen Launch für Free-Nutzer.
+
 ## 5. Gating
 | Nutzer | Verhalten (Soft-Launch) |
 |---|---|
