@@ -19,7 +19,7 @@ last_verified: 2026-06-18
 
 ## 1. Was es ist (in einem Satz)
 
-Der Nutzer **spricht** mit einer KI-Prüfer-Stimme („Dr. Klaus Wagner"), die praxisnahe §34a-Fallbeispiele
+Der Nutzer **spricht** mit einer KI-Prüfer-Stimme („Herr Müller"), die praxisnahe §34a-Fallbeispiele
 stellt und dynamisch nachfragt; danach bewertet ein zweites KI-Modell (Gemini) das Gesprächs-Transkript
 und liefert Score, Pass/Fail (Grenze **50 %**), Themen-Scores, Stärken/Lücken, Musterantworten,
 „roter Faden" und den nächsten Übungsschritt.
@@ -35,7 +35,7 @@ Zwei KI-Bausteine, klar getrennt:
 ```
 /exam  ──(Admin)──▶  Karte "Mündliche Prüfung"  ──▶  /oral-exam (Intro)
    │
-   │  Intro: Kurzinfo + "Mündliche Prüfung starten" (startet immer mit allen Themen)
+   │  Intro: Kurzinfo + Test-Modus-Wahl (Free/Premium, Admin) + "Mündliche Prüfung starten" (alle Themen)
    ▼
 /oral-exam/live
    │  1. Mikrofon-Freigabe (Browser-Prompt)
@@ -46,7 +46,8 @@ Zwei KI-Bausteine, klar getrennt:
    │     - "Prüfung beenden" jederzeit, oder Timeout, oder Prüfer beendet
    ▼  finish(): Session beenden → Transkript an Bewertung schicken
 /oral-exam/results/:sessionId
-   │  Score + Bestanden/Nicht bestanden, Themen-Balken, Stärken/Lücken,
+   │  Score + Bestanden/Nicht bestanden, KI-Zusammenfassung, Pro-Antwort-Bewertung
+   │  (+ Empfehlungen), Audio-Player, Themen-Balken, Stärken/Lücken,
    │  Musterantworten, roter Faden, nächster Schritt
    ▼  "Nochmal üben" → /oral-exam   |   "Verlauf" → /oral-exam/history
 ```
@@ -72,7 +73,7 @@ OralExamIntro
 OralExamLive (@elevenlabs/react)
   useConversation.startSession({ signedUrl, connectionType:'websocket', dynamicVariables })
      ◀────────── WebSocket: Sprache rein/raus, Turn-Taking ──────────────────▶ ElevenLabs Agent
-     · onConnect → conversationId merken                                        (Dr. Klaus Wagner)
+     · onConnect → conversationId merken                                        (Herr Müller)
      · onMessage → Live-Transkript (Fallback)
      · Timer/Beenden/onDisconnect → finish()
 
@@ -111,8 +112,10 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 **Ablauf serverseitig:**
 1. **Auth:** Nutzer aus JWT auflösen → kein Nutzer ⇒ `401 {error:"unauthorized"}`.
 2. **Admin-Gate (Soft-Launch):** Nur `m.almajzoub1@gmail.com` darf ⇒ sonst `403 {error:"feature_not_available"}`.
-3. **Premium/Modus:** Admin ⇒ immer `full_5min`. (Für späteren öffentlichen Launch: `isUserPremium()`
-   prüft `subscriptions`, `user_profiles.is_premium`, aktive `access_grants`.)
+3. **Premium/Modus:** Admin darf den Modus explizit wählen (`requested_mode` = `free_test_3q`/`full_5min`,
+   für Tests beider Abläufe); sonst Admin ⇒ `full_5min`. (Für späteren öffentlichen Launch: `isUserPremium()`
+   prüft `subscriptions`, `user_profiles.is_premium`, aktive `access_grants`; `requested_mode` ist für
+   Nicht-Admins wirkungslos.)
 4. **Free-Gating:** Nicht-Premium mit bereits 1 abgeschlossenem Gratis-Test ⇒ `200 {paywallRequired:true}`.
 5. **Session anlegen:** Zeile in `oral_exam_sessions` mit `status='running'`.
 6. **Signed URL:** von ElevenLabs holen (`xi-api-key` bleibt serverseitig).
@@ -138,7 +141,7 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 
 ---
 
-## 5. Die Sprach-KI — ElevenLabs Agent „Dr. Klaus Wagner"
+## 5. Die Sprach-KI — ElevenLabs Agent „Herr Müller"
 
 - **Conversational-AI-Agent** bei ElevenLabs (Voice rein/raus, Turn-Taking, Barge-in).
 - Sprache **Deutsch**, Modell `eleven_flash_v2_5` (niedrige Latenz), Max-Dauer 360 s als Kosten-Backstop.
@@ -179,11 +182,14 @@ Datei: [`supabase/functions/oral-exam-evaluation/index.ts`](../../supabase/funct
 2. **Idempotenz:** Ist die Session bereits `done`, wird das **vorhandene** Ergebnis zurückgegeben
    (kein zweiter Gemini-Aufruf, keine Kosten).
 3. **Transkript bestimmen:** zuerst **autoritativ von ElevenLabs** (`GET /v1/convai/conversations/{id}`,
-   bis zu 3 Versuche à 1,5 s, falls noch „processing"); Fallback = Client-Transkript. Leer ⇒ Fehler.
+   bis zu 5 Versuche mit steigender Wartezeit, falls noch „processing"); Fallback = Client-Transkript. Leer ⇒ Fehler.
 4. **Bewertung (Gemini):** `gemini-2.5-flash`, `temperature 0.3`, `responseMimeType: application/json`,
-   alle Safety-Settings auf `BLOCK_NONE` (Prüfungsinhalte können Gewalt/Recht berühren).
-5. **Speichern:** `status='done'`, `ended_at`, `duration_s`, `transcript`, `overall_score_pct`,
-   `passed`, `topic_scores`, `feedback` in `oral_exam_sessions`.
+   `maxOutputTokens 8192`, alle Safety-Settings auf `BLOCK_NONE` (Prüfungsinhalte können Gewalt/Recht berühren).
+5. **Audio sichern (best-effort):** vollständiges Gesprächs-Audio von ElevenLabs
+   (`GET /v1/convai/conversations/{id}/audio`, `audio/mpeg`) → privater Bucket `oral-exam-audio`
+   unter `{user_id}/{sessionId}.mp3`; Pfad in `audio_path`. Audio-Fehler lassen die Bewertung nicht scheitern.
+6. **Speichern:** `status='done'`, `ended_at`, `duration_s`, `transcript`, `overall_score_pct`,
+   `passed`, `topic_scores`, `feedback` (inkl. `summary` + `answer_evaluations`), `audio_path` in `oral_exam_sessions`.
 
 **Bewertungs-Maßstab (Prompt):** „erfahrener IHK-Prüfer", **fair, aber nach echten IHK-Maßstäben**.
 Bewertet **nicht nur Faktenwissen**, sondern auch **Praxis-Angemessenheit, Deeskalations-Haltung,
@@ -196,14 +202,21 @@ Score + Erklärung in `gaps`, `passed` muss konsistent zu `overall_score_pct` se
 {
   "overall_score_pct": 0-100,
   "passed": true|false,                  // serverseitig erzwungen: overall_score_pct >= 50
+  "summary": "2-4 Sätze: wie die Prüfung lief, bestanden/nicht, Hauptschwächen",
   "topic_scores": [{ "topic": "…", "score_pct": 0-100, "comment": "1 Satz" }],
+  "answer_evaluations": [{ "question": "…", "candidate_answer": "…", "score_pct": 0-100, "verdict": "correct|partial|wrong", "recommendation": "nur bei partial/wrong" }],
   "strengths": ["…"],
   "gaps": ["…"],
   "model_answers": [{ "scenario": "…", "musterantwort": "…" }],
   "roter_faden": ["2-3 Sätze für die echte Prüfung"],
-  "next_step": "1 konkreter nächster Übungsschritt"
+  "next_step": "1 konkreter nächster Übungsschritt",
+  "audio_path": "{user_id}/{sessionId}.mp3 | null"
 }
 ```
+> `summary` (KI-Gesamt-Zusammenfassung) und `answer_evaluations` (**Pro-Antwort-Bewertung**: je
+> Prüfer-Frage Score + `verdict` + Empfehlung) liegen in der DB im `feedback`-JSON. Die
+> Ergebnis-Seite zeigt sie als „Zusammenfassung des Prüfers", „Deine Antworten im Detail" und (falls
+> `audio_path` gesetzt) einen Audio-Player über eine **signierte URL** (`getOralExamAudioUrl`, 1 h).
 
 > Der Score wird serverseitig auf 0–100 geklemmt/gerundet und `passed = overall_score_pct >= 50`
 > **autoritativ** neu gesetzt (unabhängig davon, was das Modell für `passed` lieferte).
@@ -229,8 +242,13 @@ Migration: [`supabase/migrations/20260616175910_create_oral_exam_sessions.sql`](
 | `overall_score_pct` | int \| null | Gesamt-Score |
 | `passed` | bool \| null | bestanden (≥50 %) |
 | `topic_scores` | jsonb \| null | `[{topic, score_pct, comment}]` |
-| `feedback` | jsonb \| null | `{strengths, gaps, model_answers, roter_faden, next_step}` |
+| `feedback` | jsonb \| null | `{summary, strengths, gaps, answer_evaluations, model_answers, roter_faden, next_step}` |
+| `audio_path` | text \| null | Pfad im privaten Bucket `oral-exam-audio` (`{user_id}/{sessionId}.mp3`) |
 | `created_at` | timestamptz (default `now()`) | Anlage |
+
+**Audio-Storage:** privater Bucket `oral-exam-audio` (Migration `20260618210000_oral_exam_audio.sql`),
+RLS-Policy `oral_exam_audio_read_own` erlaubt SELECT nur im eigenen Ordner; Upload via Service-Role
+in der Edge Function (umgeht RLS), Wiedergabe via signierter URL.
 
 **Index:** `oral_exam_sessions_user_created_idx (user_id, created_at DESC)` (für Verlaufsliste).
 **RLS-Policies:** `select/insert/update` jeweils `auth.uid() = user_id`. (Edge Functions nutzen den
@@ -260,11 +278,11 @@ eingebaut und greift automatisch, sobald das Admin-Gate entfernt wird.
 
 | Datei | Rolle |
 |---|---|
-| [`src/components/pages/OralExamIntro.tsx`](../../src/components/pages/OralExamIntro.tsx) | Einstieg, Schwerpunktwahl, Start; behandelt `feature_not_available`/`paywallRequired` |
-| [`src/components/pages/OralExamLive.tsx`](../../src/components/pages/OralExamLive.tsx) | Live-Gespräch (ElevenLabs), Mikro, Timer, Transkript, `finish()` |
-| [`src/components/pages/OralExamResults.tsx`](../../src/components/pages/OralExamResults.tsx) | Auswertung (Score, Themen-Balken, Stärken/Lücken, Musterantworten, roter Faden) |
+| [`src/components/pages/OralExamIntro.tsx`](../../src/components/pages/OralExamIntro.tsx) | Einstieg, Test-Modus-Wahl (Free/Premium), Start; behandelt `feature_not_available`/`paywallRequired` |
+| [`src/components/pages/OralExamLive.tsx`](../../src/components/pages/OralExamLive.tsx) | Live-Gespräch (ElevenLabs), Mikro, Timer, Transkript, Sprech-Animationen, `finish()` |
+| [`src/components/pages/OralExamResults.tsx`](../../src/components/pages/OralExamResults.tsx) | Auswertung (Score, KI-Zusammenfassung, Pro-Antwort-Bewertung, Audio-Player, Themen-Balken, Stärken/Lücken, Musterantworten, roter Faden) |
 | [`src/components/pages/OralExamHistory.tsx`](../../src/components/pages/OralExamHistory.tsx) | Verlauf der eigenen Durchläufe |
-| [`src/services/oralExam.ts`](../../src/services/oralExam.ts) | API: `startOralExamSession`, `evaluateOralExam`, `getOralExamSession`, `listOralExamSessions`, `abortOralExamSession` + Fehlerklassen |
+| [`src/services/oralExam.ts`](../../src/services/oralExam.ts) | API: `startOralExamSession`, `evaluateOralExam`, `getOralExamSession`, `listOralExamSessions`, `abortOralExamSession`, `getOralExamAudioUrl` + Fehlerklassen |
 | [`src/types.ts`](../../src/types.ts) | `OralExam*`-Typen + `ORAL_EXAM_FOCUS_TOPICS` |
 | [`src/components/pages/ExamSelection.tsx`](../../src/components/pages/ExamSelection.tsx) | Einstiegskarte (Admin-gated) |
 | [`src/App.tsx`](../../src/App.tsx) | Routen (lazy, in `<AdminGuard>`) |
@@ -292,7 +310,7 @@ Dependency: `@elevenlabs/react` (Hook `useConversation` + `ConversationProvider`
 | Secret | Genutzt von | Zweck |
 |---|---|---|
 | `ELEVENLABS_API_KEY` | beide oral-Functions | Signed URL holen / Transkript abrufen |
-| `ELEVENLABS_AGENT_ID` | `oral-exam-session` | welcher Agent (Dr. Klaus Wagner) |
+| `ELEVENLABS_AGENT_ID` | `oral-exam-session` | welcher Agent (Herr Müller) |
 | `GOOGLE_AI_API_KEY` | `oral-exam-evaluation` | Gemini-Bewertung |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | beide | DB-Zugriff / Auth |
 | `ALLOWED_ORIGIN` | beide | CORS |
