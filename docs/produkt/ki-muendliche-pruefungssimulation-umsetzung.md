@@ -105,9 +105,8 @@ Browser (React 19 SPA)
 
 ## 4. ElevenLabs-Agent
 - „34a Master – Mündliche Prüfung (**Herr Müller**)", Sprache **de**, Modell `eleven_flash_v2_5`.
-- `agent_id` liegt als Supabase-Secret `ELEVENLABS_AGENT_ID` (nicht im Repo).
-- Dynamic Variables: `mode`, `focus_topic`, `scenario_id`, `scenario_title`, `scenario_topic`,
-  `scenario_brief`, `scenario_expected`, `candidate_name`, `session_seed`.
+- `agent_id`s liegen als Supabase-Secrets `ELEVENLABS_AGENT_ID_MINI` (Standard) und `ELEVENLABS_AGENT_ID_FULL` (Vollsimulation) (nicht im Repo).
+- Dynamic Variables: `candidate_name`, `scenario_title`, `scenario_topic`, `scenario_brief`, `scenario_expected`, `session_seed`.
 - Prüfer-Name (im Prompt **und** in der UI [`OralExamLive.tsx`]) = **Herr Müller**.
 - Aktueller Stand (2026-06-19): `oral-exam-session` wählt ein konkretes Szenario aus einem kuratierten
   Pool, meidet die letzten Fälle des Nutzers und übergibt es an ElevenLabs. `session_seed` bleibt als
@@ -126,23 +125,21 @@ Browser (React 19 SPA)
   Bei schlechten Antworten oder „Ich weiß es nicht" darf der Agent nicht abbrechen, sondern muss zum
   nächsten Hauptfall gehen. Temperature wurde auf `0.45` gesetzt, weil Backend-Szenarien die Variation
   liefern und der Agent die Zählregeln verlässlicher befolgen soll. Der technische Premium-Backstop
-  liegt jetzt bei 900 Sekunden.
+  liegt jetzt bei 1200 Sekunden.
 
-### 4a. Ein Agent, kein zweiter (Architekturentscheidung 2026-06-18)
-**Bewusst genau EIN Agent** statt getrennter Agenten für Abonnenten/Nicht-Abonnenten. Begründung:
-der einzige Verhaltensunterschied ist der Schlusssatz — das löst die bereits übergebene
-Dynamic-Variable `{{mode}}` (`free_test_3q` vs. `full_simulation`) im System-Prompt. Zwei Agenten würden
-jede künftige Prompt-/Persona-Verbesserung verdoppeln (Drift-Gefahr) und eine zweite `agent_id`
-erfordern. Erst splitten, falls die Modi inhaltlich stark auseinanderlaufen (anderer
-Schwierigkeitsgrad/Themen-Tiefe).
+### 4a. Zwei dedizierte Agenten (Architekturentscheidung 2026-06-19)
+**Zwei getrennte Agenten** für Abonnenten/Nicht-Abonnenten. Begründung:
+LLMs tendieren dazu, Pseudo-Programmierung wie Modus-Verzweigungen und verschachtelte Wenn-Regeln
+in einem einzelnen System-Prompt unzuverlässig auszuführen. Durch die Trennung in zwei dedizierte
+Agenten (`ELEVENLABS_AGENT_ID_MINI` und `ELEVENLABS_AGENT_ID_FULL`) hat jeder Agent einen klaren,
+vereinfachten Prompt, der sich voll auf seine spezifische Fall- und Nachfragenanzahl fokussiert.
 
-### 4b. Modus-abhängiger Abschluss (im ElevenLabs-Prompt, per API gesetzt 2026-06-18)
-Die `ENDE`-Sektion des System-Prompts verzweigt nach `{{mode}}`:
-- `full_simulation`: neutraler Abschluss („…Prüfung ist hiermit beendet. Ihre Auswertung folgt gleich.").
-- `free_test_3q`: zusätzlich ein **seriöser Premium-Hinweis** des Prüfers — die Mini-Simulation sei
-  nur ein verkürzter Eindruck; die vollständige Simulation (volle Länge, mehrere Fallbeispiele, tiefe
-  Rückfragen) sei Teil von **34a Master Premium**. Keine Bewertung/Note.
-- Der Prompt liegt **nur bei ElevenLabs** (nicht im Repo). Änderungen via
+### 4b. Modus-abhängiger Abschluss
+Die `ENDE`-Sektion des System-Prompts ist nun in den jeweiligen Agenten-Prompts fest hinterlegt:
+- **Full-Simulation**: neutraler Abschluss („Vielen Dank, die Prüfung ist hiermit beendet.“) nach 8 Fällen.
+- **Mini-Simulation**: neutraler Abschluss nach 3 Fällen.
+- Der jeweilige Prompt wird im Dashboard oder über das Skript `scripts/update-elevenlabs-oral-agent.mjs`
+  auf ElevenLabs aufgespielt.
   `PATCH /v1/convai/agents/{agent_id}` mit `conversation_config.agent.prompt.prompt` und dem
   `xi-api-key` (= Secret `ELEVENLABS_API_KEY`, nie committen).
 - Im öffentlichen Ticketmodell greift der Premium-Hinweis für Free-Nutzer im Modus `free_test_3q`.
@@ -150,11 +147,15 @@ Die `ENDE`-Sektion des System-Prompts verzweigt nach `{{mode}}`:
 ## 4c. Prüfungstickets (Public-Launch, 2026-06-19)
 - Gäste sehen die Karte, müssen sich aber registrieren/anmelden, bevor eine Session gestartet wird.
 - Free-Nutzer erhalten **1 Mini-Simulation** (`free_test_3q`, 180 Sekunden).
-- Premium-Nutzer erhalten **10 Vollsimulationen pro Abo-Zeitraum** (`full_simulation`, 900 Sekunden).
-- Ein Ticket wird beim Start reserviert: `oral-exam-session` holt zuerst die ElevenLabs Signed URL und
-  legt danach die Session-Zeile an. Provider-/Secret-Fehler vor der Signed URL verbrauchen kein Ticket.
-- Verbrauch wird über gestartete `oral_exam_sessions` gezählt, nicht nur über erfolgreich ausgewertete
-  Sessions. Abgebrochene Sessions zählen, weil bereits KI-Kosten entstehen können.
+- Premium-Nutzer erhalten **10 Vollsimulationen pro Abo-Zeitraum** (`full_simulation`, 1200 Sekunden).
+- `oral-exam-session` holt zuerst die ElevenLabs Signed URL und legt danach eine Session mit
+  `status='pending'` an. Provider-/Secret-Fehler vor der Signed URL verbrauchen kein Ticket.
+- Ein Ticket zählt erst, wenn die Session real mit ElevenLabs verbunden ist:
+  `OralExamLive.tsx` setzt bei `onConnect` über `confirmOralExamSession()` `connected_at` und
+  `status='running'`.
+- Verbrauch wird über `connected_at` gezählt, nicht über bloß gestartete/pending Sessions.
+  Verbundene Sessions zählen auch dann, wenn sie später `aborted` oder `evaluation_failed` sind,
+  weil ab Verbindung KI-Kosten entstehen können.
 
 ## 4d. Sprech-Animationen (UI, `OralExamLive.tsx`)
 - **Prüfer spricht**: primär über den hörbaren Ausgangspegel `getOutputVolume()` plus SDK-Modus
@@ -219,12 +220,36 @@ model_answers[{scenario,musterantwort}], roter_faden[], next_step }`. Bestehensg
   `oral_exam_audio_read_own` erlaubt nur den eigenen Ordner. Player auf der Ergebnisseite.
 - Migration: `supabase/migrations/20260618210000_oral_exam_audio.sql` (Spalte `audio_path` + Bucket + RLS).
 
-## 7. Offene Schritte
-- **Deployment:** Migration `20260619170928_add_subscription_period_start.sql` anwenden,
-  `oral-exam-entitlement`, `oral-exam-session`, `oral-exam-evaluation` und Stripe-Sync/Webhook-Functions
-  deployen, danach Frontend-Prod-Deploy.
+## 7. Lokaler Teststand (2026-06-20)
+- `npm run build` erfolgreich.
+- `npm run test:oral-exam-entitlement` erfolgreich: Free/Premium/Grant-Gating, `connected_at`-Zählung
+  und pending Sessions ohne Ticketverbrauch.
+- `npm run test:oral-exam-routing` erfolgreich: Mini-Nutzer bekommen `ELEVENLABS_AGENT_ID_MINI`
+  bzw. Fallback `ELEVENLABS_AGENT_ID`; Vollsimulation nutzt `ELEVENLABS_AGENT_ID_FULL`.
+- `npm run test:oral-exam-scenarios` erfolgreich: alle 12 kuratierten Szenarien sind vorhanden,
+  eindeutig und enthalten Titel, Thema, Fallbeschreibung und Erwartung.
+- Codepfad geprüft: `/exam` zeigt die mündliche Karte öffentlich; `/oral-exam*` ist nicht mehr hinter
+  `AdminGuard`; Start erzeugt `pending`, `onConnect` setzt `connected_at`, danach zählt das Ticket.
+
+Nicht automatisiert lokal abgedeckt: echte ElevenLabs-Gespräche über alle 12 Szenarien, echte
+Browser-Mikrofonberechtigung auf Zielgeräten, OpenAI-Bewertung mit Live-Transkript und Audio-Upload in
+Supabase Storage. Diese Punkte bleiben Teil des manuellen Smoke-Tests vor Deployment.
+
+## 8. Supabase-Deploy-Stand (2026-06-20)
+- `supabase db push --dry-run` gegen Projekt `fcwyavxxcblcbdezobgz`: **Remote database is up to date**.
+- Live-Schema geprüft: `oral_exam_sessions.connected_at` ist per Service-Role-Select abfragbar.
+- Storage geprüft: Bucket `oral-exam-audio` existiert und ist privat (`public=false`).
+- Edge Functions deployed:
+  - `oral-exam-entitlement` Version 5
+  - `oral-exam-session` Version 20
+  - `oral-exam-evaluation` Version 11
+- Runtime-Sanity-Check: alle drei Functions liefern ohne eingeloggten Nutzer erwartungsgemäß
+  `401 {"error":"unauthorized"}`.
+
+## 9. Offene Schritte
+- **Frontend-Prod-Deploy:** aktuelles Frontend-Bundle veröffentlichen.
 - **Launch-Test:** Echte Free-Registrierung, 1 Mini-Simulation, Paywall danach; echtes Premium-Konto mit
-  10er-Zähler, Verbrauch nach Start, Blockade bei 0 Tickets.
+  10er-Zähler, Verbrauch ab `connected_at`, Abbruch nach Verbindung, Blockade bei 0 Tickets.
 - **Später:** UI-Optimierungen nach Nutzungsdaten, Flashcards/RAG für ElevenLabs, kuratierter Szenario-Pool.
 
 ## Verweise

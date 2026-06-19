@@ -240,6 +240,7 @@ export interface OralExamSession {
   topic_scores: OralExamTopicScore[] | null;
   feedback: OralExamFeedback | null;
   audio_path: string | null;
+  connected_at: string | null;
   created_at: string;
 }
 

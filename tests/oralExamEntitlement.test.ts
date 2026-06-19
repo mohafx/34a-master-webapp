@@ -39,6 +39,11 @@ class MockQuery {
     return this;
   }
 
+  not(column: string, operator: string, value: unknown) {
+    this.filters.push({ column, value, op: 'not', operator } as any);
+    return this;
+  }
+
   order(_column: string, _options?: unknown) {
     return this;
   }
@@ -68,7 +73,15 @@ class MockQuery {
         const value = row[filter.column];
         if (filter.op === 'eq') return value === filter.value;
         if (filter.op === 'gte') return new Date(value).getTime() >= new Date(String(filter.value)).getTime();
-        return new Date(value).getTime() <= new Date(String(filter.value)).getTime();
+        if (filter.op === 'lte') return new Date(value).getTime() <= new Date(String(filter.value)).getTime();
+        if ((filter as any).op === 'not') {
+          if ((filter as any).operator === 'is') {
+            if (filter.value === null) {
+              return value !== null && value !== undefined;
+            }
+          }
+        }
+        return true;
       });
     }
     if (this.limitValue !== null) rows = rows.slice(0, this.limitValue);
@@ -106,8 +119,8 @@ describe('oral exam entitlement', () => {
       ],
       access_grants: [],
       oral_exam_sessions: [
-        { user_id: userId, mode: 'free_test_3q', created_at: '2026-06-10T00:00:00.000Z' },
-        { user_id: userId, mode: 'full_simulation', created_at: '2026-06-12T00:00:00.000Z' },
+        { user_id: userId, mode: 'free_test_3q', created_at: '2026-06-10T00:00:00.000Z', connected_at: '2026-06-10T00:01:00.000Z' },
+        { user_id: userId, mode: 'full_simulation', created_at: '2026-06-12T00:00:00.000Z', connected_at: '2026-06-12T00:01:00.000Z' },
       ],
     };
 
@@ -134,7 +147,7 @@ describe('oral exam entitlement', () => {
       ],
       access_grants: [],
       oral_exam_sessions: [
-        { user_id: userId, mode: 'free_test_3q', created_at: '2026-06-12T00:00:00.000Z' },
+        { user_id: userId, mode: 'free_test_3q', created_at: '2026-06-12T00:00:00.000Z', connected_at: '2026-06-12T00:01:00.000Z' },
       ],
     };
 
@@ -144,6 +157,23 @@ describe('oral exam entitlement', () => {
     expect(entitlement.mode).toBe('free_test_3q');
     expect(entitlement.used).toBe(1);
     expect(entitlement.remaining).toBe(0);
+  });
+
+  it('does not count pending sessions without connected_at against the free ticket', async () => {
+    const userId = 'user-free-pending';
+    const db: MockDb = {
+      subscriptions: [],
+      access_grants: [],
+      oral_exam_sessions: [
+        { user_id: userId, mode: 'free_test_3q', status: 'pending', created_at: '2026-06-12T00:00:00.000Z', connected_at: null },
+      ],
+    };
+
+    const entitlement = await getOralExamEntitlement(createClient(db), userId);
+
+    expect(entitlement.isPremium).toBe(false);
+    expect(entitlement.used).toBe(0);
+    expect(entitlement.remaining).toBe(1);
   });
 
   it('grants premium through active transition grants', async () => {
@@ -160,8 +190,8 @@ describe('oral exam entitlement', () => {
         },
       ],
       oral_exam_sessions: [
-        { user_id: userId, mode: 'full_simulation', created_at: '2026-05-31T23:59:59.000Z' },
-        { user_id: userId, mode: 'full_simulation', created_at: '2026-06-02T00:00:00.000Z' },
+        { user_id: userId, mode: 'full_simulation', created_at: '2026-05-31T23:59:59.000Z', connected_at: '2026-05-31T23:59:59.000Z' },
+        { user_id: userId, mode: 'full_simulation', created_at: '2026-06-02T00:00:00.000Z', connected_at: '2026-06-02T00:01:00.000Z' },
       ],
     };
 

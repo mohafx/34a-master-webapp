@@ -156,10 +156,14 @@ Lädt den UI-Status, ohne eine ElevenLabs-Session anzulegen.
 3. **Limit erreicht:** Free ⇒ `200 {paywallRequired:true, entitlement}`; Premium ⇒
    `200 {ticketLimitReached:true, entitlement}`.
 4. **Signed URL:** von ElevenLabs holen (`xi-api-key` bleibt serverseitig).
-5. **Session anlegen:** Zeile in `oral_exam_sessions` mit `status='running'`. Das Ticket ist damit verbraucht.
-6. **Fallauswahl:** Das Backend wählt ein konkretes Szenario aus dem kuratierten Pool, meidet die
+5. **Session anlegen:** Zeile in `oral_exam_sessions` mit `status='pending'`. Das Ticket zählt noch
+   nicht.
+6. **Ticketverbrauch:** Erst wenn der Client erfolgreich mit ElevenLabs verbunden ist, setzt
+   `confirmOralExamSession()` `connected_at` und `status='running'`. Ab diesem Zeitpunkt zählt das
+   Ticket.
+7. **Fallauswahl:** Das Backend wählt ein konkretes Szenario aus dem kuratierten Pool, meidet die
    letzten Fälle dieses Nutzers und übergibt `scenario_*` plus `focus_topic` an ElevenLabs.
-7. **Session-Seed:** zusätzlicher zufälliger `session_seed` wird erzeugt und als Dynamic Variable an
+8. **Session-Seed:** zusätzlicher zufälliger `session_seed` wird erzeugt und als Dynamic Variable an
    ElevenLabs übergeben, damit Reihenfolge, Orte und Nachfragen weiter variieren können.
 
 **Erfolg (`200`):**
@@ -167,7 +171,7 @@ Lädt den UI-Status, ohne eine ElevenLabs-Session anzulegen.
 {
   "sessionId": "uuid",
   "mode": "full_simulation",            // | "free_test_3q"
-  "maxDurationSec": 900,          // 900 (voll) | 180 (free)
+  "maxDurationSec": 1200,          // 1200 (voll) | 180 (free)
   "signedUrl": "wss://…",
   "entitlement": { "isPremium": true, "used": 3, "limit": 10, "remaining": 7, "windowEndsAt": "…" },
   "dynamicVariables": {
@@ -188,22 +192,24 @@ Lädt den UI-Status, ohne eine ElevenLabs-Session anzulegen.
 | Modus | Dauer-Limit (Client-Timer) | Wer |
 |---|---|---|
 | `free_test_3q` | 180 s | eingeloggt, ohne Premium (1× gratis) |
-| `full_simulation` | 900 s | Premium (10× pro Abo-Zeitraum) |
+| `full_simulation` | 1200 s (20 Min) | Premium (10× pro Abo-Zeitraum) |
 
-> Echte Kosten-Backstops: Client-Timer **und** Max-Dauer des ElevenLabs-Agents (900 s).
-> Tickets werden beim Start verbraucht, nicht erst bei erfolgreicher Auswertung.
+> Echte Kosten-Backstops: Client-Timer **und** Max-Dauer des ElevenLabs-Agents (1200 s) sowie ein Silence-Timeout von 300 s (5 Min).
+> Tickets zählen ab echter ElevenLabs-Verbindung (`connected_at`), nicht schon beim Klick auf Start.
+> Dadurch verbrennen Mikrofon-Fehler, Reloads vor der Verbindung oder Provider-/Secret-Fehler keine
+> Tickets. Nach erfolgreicher Verbindung zählt der Versuch unabhängig davon, ob er später `done`,
+> `aborted` oder `evaluation_failed` wird.
 
 ---
 
 ## 5. Die Sprach-KI — ElevenLabs Agent „Herr Müller"
 
 - **Conversational-AI-Agent** bei ElevenLabs (Voice rein/raus, Turn-Taking, Barge-in).
-- Sprache **Deutsch**, Modell `eleven_flash_v2_5` (niedrige Latenz), Max-Dauer 900 s als Kosten-Backstop.
-- **`agent_id` ist KEIN Repo-Wert** — liegt als Supabase-Secret `ELEVENLABS_AGENT_ID`.
-- **Dynamic Variables** (vom Backend gesetzt, im Agent-Prompt nutzbar): `mode`, `focus_topic`,
-  `scenario_id`, `scenario_title`, `scenario_topic`, `scenario_brief`, `scenario_expected`,
-  `candidate_name`, `session_seed` → erlauben Personalisierung, Modus-abhängiges Verhalten
-  (Mini vs. volle Simulation) und konkrete abwechslungsreiche Fallauswahl pro Session.
+- Sprache **Deutsch**, Modell `eleven_flash_v2_5` (niedrige Latenz), Max-Dauer 1200 s als Kosten-Backstop sowie 300 s Silence-Timeout.
+- **`agent_id`s sind KEINE Repo-Werte** — liegen als Supabase-Secrets `ELEVENLABS_AGENT_ID_MINI` (Mini-Simulation, Standard) und `ELEVENLABS_AGENT_ID_FULL` (Vollsimulation).
+- **Dynamic Variables** (vom Backend gesetzt, im Agent-Prompt nutzbar): `candidate_name`, `scenario_title`,
+  `scenario_topic`, `scenario_brief`, `scenario_expected`, `session_seed` → erlauben Personalisierung,
+  individuelle Fallausgabe und konkrete abwechslungsreiche Fallauswahl pro Session.
 - Aktueller Agent-Stand (2026-06-19): Backend wählt ein Szenario und meidet Wiederholungen; der Agent
   bekommt zusätzlich `{{session_seed}}` für Variation bei Reihenfolge, Orten und Nachfragen.
 - **Rolle des Agents:** stellt praxisnahe Fallbeispiele, fragt dynamisch nach („Warum?", „Und wenn …?"),
@@ -382,7 +388,8 @@ Dependency: `@elevenlabs/react` (Hook `useConversation` + `ConversationProvider`
 | Secret | Genutzt von | Zweck |
 |---|---|---|
 | `ELEVENLABS_API_KEY` | beide oral-Functions | Signed URL holen / Transkript abrufen |
-| `ELEVENLABS_AGENT_ID` | `oral-exam-session` | welcher Agent (Herr Müller) |
+| `ELEVENLABS_AGENT_ID_MINI` | `oral-exam-session` | Agent-ID für Mini-Simulation (`free_test_3q`, Herr Müller Mini) |
+| `ELEVENLABS_AGENT_ID_FULL` | `oral-exam-session` | Agent-ID für Vollsimulation (`full_simulation`, Herr Müller Full) |
 | `OPENAI_API_KEY` | `oral-exam-evaluation` | OpenAI-Bewertung |
 | `OPENAI_MODEL` | `oral-exam-evaluation` | optional, Default `gpt-4.1` |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | oral-Functions | DB-Zugriff / Auth |
@@ -421,12 +428,19 @@ Status: live gesetzt und funktionsfähig (belegt durch erfolgreiche Session-Zeil
 
 ## 13. Checkliste öffentlicher Launch
 
-1. Migration `20260619170928_add_subscription_period_start.sql` anwenden.
-2. Functions deployen: `oral-exam-entitlement`, `oral-exam-session`, `oral-exam-evaluation`,
-   plus geänderte Stripe-/Sync-Functions (`stripe-webhook`, `sync-subscription`, `verify-checkout`).
-3. Frontend-Prod-Deploy.
-4. Smoke-Test mit Gast, Free-Nutzer, Premium-Nutzer und ausgeschöpftem Premium-Kontingent.
-5. Optional Phase 5: UI-Optimierungen, Flashcards/RAG für ElevenLabs, 15-Min-Modus, mehrere Prüfer,
+Stand 2026-06-20: Supabase-Projekt `fcwyavxxcblcbdezobgz` ist für die mündliche Prüfung aktualisiert.
+`supabase db push --dry-run` meldet **Remote database is up to date**; `connected_at` ist im
+Live-Schema abfragbar; `oral-exam-audio` ist als privater Bucket vorhanden; `oral-exam-entitlement`
+(v5), `oral-exam-session` (v20) und `oral-exam-evaluation` (v11) sind deployed.
+
+1. Frontend-Prod-Deploy.
+2. Vor dem Deploy lokal grün halten:
+   `npm run build`, `npm run test:oral-exam-entitlement`, `npm run test:oral-exam-routing`,
+   `npm run test:oral-exam-scenarios`.
+3. Smoke-Test mit Gast, Free-Nutzer, Premium-Nutzer und ausgeschöpftem Premium-Kontingent.
+   Besonders prüfen: pending ohne Mikrofon verbraucht kein Ticket, Abbruch nach Verbindung zählt,
+   abgeschlossene/fehlgeschlagene Auswertungen erscheinen im Verlauf.
+4. Optional Phase 5: UI-Optimierungen, Flashcards/RAG für ElevenLabs, 15-Min-Modus, mehrere Prüfer,
    kuratierter Szenario-Pool, echte Post-Call-Webhooks.
 
 ---

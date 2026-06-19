@@ -15,7 +15,7 @@ Das Projekt ist eine moderne **React 19 SPA** (Vite 6, Tailwind CSS 3, HashRoute
     *   **KI-Auswertung:** Detaillierte structured JSON-Bewertung durch OpenAI (`gpt-4.1`) nach echten IHK-Maßstäben (Gesamtnote, Bestehensschwelle 50 %, prozentuale Bewertung je Antwort, Stärken/Lücken, Musterantworten).
     *   **Audio-Archivierung:** Vollständiges Gesprächs-Audio wird serverseitig geladen und in einem privaten S3-Bucket (`oral-exam-audio`) gesichert. Der Player auf der Ergebnisseite lädt das Audio sicher per signierter URL.
     *   **Optimierungen (2026-06-19):** Behebung des Router-State-Syncs bei wiederholten Auswertungen (Retry) und Einführung einer Trophäen-Karte sowie exklusiver Filter (Schriftlich/Mündlich) im Verlauf.
-    *   **Launch-Gating (2026-06-19):** Live-Test erfolgreich. Die mündliche Prüfung ist technisch für den öffentlichen Zugang vorbereitet: Gäste sehen die Karte und müssen sich registrieren, Free-Nutzer haben 1 Mini-Simulation, Premium-Nutzer 10 Prüfungstickets pro Abo-Zeitraum. Das Backend setzt die Tickets über `oral-exam-session` autoritativ durch; `oral-exam-entitlement` liefert den UI-Status.
+    *   **Launch-Gating (aktualisiert 2026-06-20):** Die mündliche Prüfung ist lokal für alle Nutzer sichtbar: Gäste sehen die Karte und müssen sich registrieren, Free-Nutzer haben 1 Mini-Simulation, Premium-Nutzer 10 Prüfungstickets pro Abo-Zeitraum. Das Backend setzt die Tickets über `oral-exam-session` autoritativ durch; `oral-exam-entitlement` liefert den UI-Status. Tickets zählen erst ab echter ElevenLabs-Verbindung (`connected_at`). Supabase ist aktualisiert und verifiziert (`connected_at` live, `oral-exam-audio` privat, Functions deployed); Frontend-Prod-Deploy und echter Provider-Smoke-Test stehen noch aus.
 
 ---
 
@@ -35,8 +35,8 @@ Folgende Arbeitspakete sind für die kommenden Sprints geplant:
 *   **Ziel:** Die mündliche Prüfungssimulation als Premium-Feature etablieren.
 *   **Umsetzung:**
     *   Tarifmodell ist festgelegt: Registrierung erforderlich, 1 Free-Mini-Simulation, Premium mit 10 Vollsimulationen pro Abo-Zeitraum.
-    *   Prüfungstickets werden beim Start reserviert, weil ab diesem Zeitpunkt ElevenLabs-Kosten entstehen können.
-    *   Vor Launch: `oral-exam-session`, `oral-exam-entitlement`, `oral-exam-evaluation` und Frontend in Produktion deployen und mit echten Free-/Premium-Konten testen.
+    *   Prüfungstickets zählen erst ab erfolgreicher Verbindung zum ElevenLabs-Prüfer (`connected_at`), damit Mikrofon-Fehler oder Reloads vor der Verbindung kein Ticket verbrauchen.
+    *   Vor Launch: Frontend in Produktion deployen und mit echten Free-/Premium-Konten testen. Supabase-Backend ist seit 2026-06-20 aktualisiert.
 
 ### Task 4: Paywall anpassen & neue Features integrieren
 *   **Ziel:** Die Paywall-UI überarbeiten, um die neuen KI-Features prominent zu bewerben und höhere Conversion-Rates zu erzielen.

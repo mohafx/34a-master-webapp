@@ -39,7 +39,7 @@ Aus `src/services/database.ts` (`supabase.from('…')`) referenziert:
 
 - Free-Nutzer haben 1 `free_test_3q`-Session pro Account.
 - Premium-Nutzer haben 10 `full_simulation`-Sessions pro Abo-Zeitraum.
-- Verbrauch wird über gestartete Zeilen in `oral_exam_sessions` gezählt (`mode` + `created_at`), unabhängig davon, ob die Session später `done`, `aborted` oder `evaluation_failed` wird.
+- Verbrauch wird über Zeilen in `oral_exam_sessions` mit gesetztem `connected_at` gezählt (`mode` + `connected_at`). Pending-Sessions ohne echte ElevenLabs-Verbindung verbrauchen kein Ticket. Verbundene Sessions zählen unabhängig davon, ob sie später `done`, `aborted` oder `evaluation_failed` werden.
 - `subscriptions.current_period_start` und `subscriptions.current_period_end` bilden das Ticketfenster für Stripe-Premium. Für aktive `access_grants` gelten `starts_at`/`ends_at`.
 
 ### Erklärungsgrafiken für Quizfragen

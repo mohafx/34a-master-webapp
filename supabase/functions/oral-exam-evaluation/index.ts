@@ -260,6 +260,7 @@ serve(async (req) => {
                 { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
             );
         }
+        const connectedAtForResult = existing?.connected_at ?? (conversationId ? new Date().toISOString() : null);
 
         // Authoritatives Transkript bevorzugt von ElevenLabs; Fallback = Client-Transkript.
         let transcript = await fetchElevenLabsTranscript(conversationId);
@@ -333,7 +334,7 @@ serve(async (req) => {
                     status: "evaluation_failed",
                     ended_at: new Date().toISOString(),
                     duration_s: requestDurationS ?? existing?.duration_s ?? null,
-                    connected_at: existing?.connected_at ?? new Date().toISOString(),
+                    connected_at: connectedAtForResult,
                     transcript,
                     feedback: {
                         error: "Auswertung konnte nicht erzeugt werden.",
@@ -367,7 +368,7 @@ serve(async (req) => {
                 status: "done",
                 ended_at: new Date().toISOString(),
                 duration_s: requestDurationS ?? existing?.duration_s ?? null,
-                connected_at: existing?.connected_at ?? new Date().toISOString(),
+                connected_at: connectedAtForResult,
                 transcript,
                 overall_score_pct: overall,
                 passed,
@@ -396,7 +397,6 @@ serve(async (req) => {
                     status: "evaluation_failed",
                     ended_at: new Date().toISOString(),
                     duration_s: requestDurationS,
-                    connected_at: new Date().toISOString(),
                     transcript: resolvedTranscript,
                     feedback: {
                         error: error?.message || "unknown",

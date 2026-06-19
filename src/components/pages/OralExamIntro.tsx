@@ -237,7 +237,7 @@ export default function OralExamIntro() {
                     </button>
                     <p className="text-center text-[11px] md:text-xs text-slate-400 dark:text-slate-500 mt-2 md:mt-3">
                         {entitlement?.isPremium
-                            ? 'Ein Prüfungsticket wird beim Start reserviert.'
+                            ? 'Ein Prüfungsticket zählt erst, wenn die Verbindung zum Prüfer steht.'
                             : 'Nach dem Start fragt dein Browser nach dem Mikrofon-Zugriff. Bitte bestätige die Anfrage.'}
                     </p>
                 </div>
@@ -258,32 +258,48 @@ export default function OralExamIntro() {
                         <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
                             <VolumeX size={24} strokeWidth={2.5} />
                         </div>
-                        <h2 className="text-xl font-black text-slate-900 dark:text-white">Welche Simulation?</h2>
+                        <h2 className="text-xl font-black text-slate-900 dark:text-white">
+                            {entitlement?.isPremium ? 'Volle Simulation starten?' : 'Mini-Simulation starten?'}
+                        </h2>
                         <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                             Starte in einem ruhigen Raum ohne Hintergrundgeräusche und bestätige danach den
-                            Mikrofon-Zugriff im Browser. Wähle, welche Prüfung du üben möchtest:
+                            Mikrofon-Zugriff im Browser.
                         </p>
                         <div className="mt-6 space-y-3">
+                            {entitlement?.isPremium ? (
+                                <button
+                                    type="button"
+                                    onClick={() => void handleStart('full_simulation')}
+                                    disabled={loading}
+                                    className="w-full rounded-2xl bg-violet-600 px-5 py-4 text-left font-black text-white transition-all active:scale-95 disabled:opacity-60"
+                                >
+                                    <span className="block">Volle Prüfungssimulation</span>
+                                    <span className="mt-0.5 block text-xs font-semibold text-violet-100">
+                                        Mehrere Fälle, tiefe Rückfragen · bis ~15 Min
+                                    </span>
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => void handleStart('free_test_3q')}
+                                    disabled={loading}
+                                    className="w-full rounded-2xl bg-violet-600 px-5 py-4 text-left font-black text-white transition-all active:scale-95 disabled:opacity-60"
+                                >
+                                    <span className="block">Mini-Simulation</span>
+                                    <span className="mt-0.5 block text-xs font-semibold text-violet-100">
+                                        3 kurze Fälle · ~3 Min
+                                    </span>
+                                </button>
+                            )}
                             <button
                                 type="button"
-                                onClick={() => void handleStart('full_simulation')}
-                                disabled={loading}
-                                className="w-full rounded-2xl bg-violet-600 px-5 py-4 text-left font-black text-white transition-all active:scale-95 disabled:opacity-60"
-                            >
-                                <span className="block">Volle Prüfungssimulation</span>
-                                <span className="mt-0.5 block text-xs font-semibold text-violet-100">
-                                    Mehrere Fälle, tiefe Rückfragen · bis ~15 Min
-                                </span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => void handleStart('free_test_3q')}
+                                onClick={() => setShowPrepDialog(false)}
                                 disabled={loading}
                                 className="w-full rounded-2xl border-2 border-slate-200 bg-white px-5 py-4 text-left font-black text-slate-800 transition-all active:scale-95 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                             >
-                                <span className="block">Mini-Simulation</span>
+                                <span className="block">Noch nicht starten</span>
                                 <span className="mt-0.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
-                                    3 kurze Fälle · ~3 Min
+                                    Zurück zur Übersicht
                                 </span>
                             </button>
                             {loading && (
@@ -399,7 +415,7 @@ function TicketPanel({
                             ? entitlement.isPremium
                                 ? 'Deine Tickets für diesen Abo-Zeitraum sind aufgebraucht.'
                                 : 'Deine kostenlose Mini-Simulation ist aufgebraucht.'
-                            : 'Ein Ticket wird beim Start der Simulation reserviert.'}
+                            : 'Ein Ticket zählt erst, wenn die Verbindung zum Prüfer steht.'}
                     </p>
                 </div>
             </div>

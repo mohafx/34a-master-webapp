@@ -935,11 +935,11 @@ function AppContent() {
                     <Route path="/written-exam" element={<WrittenExam />} />
                     <Route path="/written-exam/results/:sessionId" element={<WrittenExamResults />} />
                     <Route path="/exam/history" element={<WrittenExamHistory />} />
-                    {/* Mündliche Prüfung: vorerst nur für Admin (Public-Launch später). */}
-                    <Route path="/oral-exam" element={<AdminGuard><OralExamIntro /></AdminGuard>} />
-                    <Route path="/oral-exam/live" element={<AdminGuard><OralExamLive /></AdminGuard>} />
-                    <Route path="/oral-exam/results/:sessionId" element={<AdminGuard><OralExamResults /></AdminGuard>} />
-                    <Route path="/oral-exam/history" element={<AdminGuard><OralExamHistory /></AdminGuard>} />
+                    {/* Mündliche Prüfung: öffentlich sichtbar; Auth und Tickets werden serverseitig erzwungen. */}
+                    <Route path="/oral-exam" element={<OralExamIntro />} />
+                    <Route path="/oral-exam/live" element={<OralExamLive />} />
+                    <Route path="/oral-exam/results/:sessionId" element={<OralExamResults />} />
+                    <Route path="/oral-exam/history" element={<OralExamHistory />} />
                     <Route path="/statistics" element={<Statistics />} />
                     <Route path="/lernplan" element={<Navigate to="/" replace />} />
 

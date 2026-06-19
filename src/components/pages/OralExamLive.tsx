@@ -5,6 +5,9 @@ import { Mic, MicOff, Loader2, PhoneOff, AlertTriangle, Volume2 } from 'lucide-r
 import { evaluateOralExam, abortOralExamSession, confirmOralExamSession } from '../../services/oralExam';
 import type { OralExamTranscriptTurn } from '../../types';
 
+// Module-level lock to prevent duplicate startSession calls during React StrictMode remounts
+let globalActiveSessionId: string | null = null;
+
 interface LiveState {
     sessionId: string;
     signedUrl: string;
@@ -51,8 +54,10 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         onConnect: ({ conversationId }) => {
             conversationIdRef.current = conversationId;
             // Ab hier hat die Session real verbunden → Ticket zählt jetzt (connected_at).
-            if (!isMock) void confirmOralExamSession(state.sessionId);
-            setPhase('live');
+            void (async () => {
+                if (!isMock) await confirmOralExamSession(state.sessionId);
+                setPhase('live');
+            })();
         },
         onDisconnect: () => {
             // Vom Agenten/Server beendet → auswerten (sofern nicht schon beendet).
@@ -101,19 +106,18 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const startLiveSession = useCallback(async () => {
         if (isMock) return;
 
+        // Prevent StrictMode double-start
+        if (globalActiveSessionId === state.sessionId) {
+            return;
+        }
+        globalActiveSessionId = state.sessionId;
+
         setMicrophoneBlocked(false);
         setErrorMsg(null);
-        setPhase('permission');
 
-        try {
-            if (!navigator.mediaDevices?.getUserMedia) {
-                throw new Error('mediaDevicesUnsupported');
-            }
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            stream.getTracks().forEach((track) => track.stop());
-        } catch (_) {
+        if (!navigator.mediaDevices?.getUserMedia) {
             setMicrophoneBlocked(true);
-            setErrorMsg('Mikrofon-Zugriff wurde nicht bestätigt. Deshalb kann die mündliche Prüfung nicht gestartet werden. Bitte erlaube den Mikrofon-Zugriff im Browser und versuche es erneut.');
+            setErrorMsg('Dein Browser unterstützt keinen Mikrofon-Zugriff.');
             setPhase('error');
             startedRef.current = false;
             return;
@@ -127,8 +131,20 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                 connectionType: 'websocket',
                 dynamicVariables: state.dynamicVariables,
             });
-        } catch (err) {
-            setErrorMsg(err instanceof Error ? err.message : 'Verbindung zum Prüfer fehlgeschlagen.');
+        } catch (err: any) {
+            const errorMsgLower = (err?.message || '').toLowerCase();
+            const isMicError = 
+                errorMsgLower.includes('permission') || 
+                errorMsgLower.includes('allowed') || 
+                errorMsgLower.includes('notallowederror') ||
+                err?.name === 'NotAllowedError';
+
+            if (isMicError) {
+                setMicrophoneBlocked(true);
+                setErrorMsg('Mikrofon-Zugriff wurde nicht bestätigt. Deshalb kann die mündliche Prüfung nicht gestartet werden. Bitte erlaube den Mikrofon-Zugriff im Browser und versuche es erneut.');
+            } else {
+                setErrorMsg(err instanceof Error ? err.message : 'Verbindung zum Prüfer fehlgeschlagen.');
+            }
             setPhase('error');
             startedRef.current = false;
         }
@@ -166,6 +182,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                 conversationIdRef.current
             );
             setEvaluationProgress(100);
+            globalActiveSessionId = null;
             navigate(`/oral-exam/results/${state.sessionId}`, {
                 replace: true,
                 state: { result, mode: state.mode },
@@ -178,16 +195,38 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             setErrorMsg(friendly);
             setPhase('error');
             setEvaluationProgress(0);
+            globalActiveSessionId = null;
             finishingRef.current = false;
         }
     }, [conversation, isMock, navigate, remaining, state.maxDurationSec, state.mode, state.sessionId]);
+
+    const abortAndLeave = useCallback(async () => {
+        if (finishingRef.current) return;
+        finishingRef.current = true;
+        
+        try { conversation.endSession(); } catch (_) { /* noop */ }
+        
+        if (!isMock) {
+            await abortOralExamSession(state.sessionId);
+        }
+        
+        globalActiveSessionId = null;
+        navigate('/oral-exam', { replace: true });
+    }, [conversation, isMock, navigate, state.sessionId]);
 
     // Start: Mikro-Permission holen, dann ElevenLabs-Session aufbauen (einmalig).
     useEffect(() => {
         if (isMock) return;
         if (startedRef.current) return;
-        startedRef.current = true;
-        void startLiveSession();
+
+        const timer = setTimeout(() => {
+            startedRef.current = true;
+            void startLiveSession();
+        }, 50);
+
+        return () => {
+            clearTimeout(timer);
+        };
     }, [isMock, startLiveSession]);
 
     // Countdown — nur während die Prüfung läuft.
@@ -293,6 +332,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     // Cleanup beim Verlassen ohne Abschluss → Session abbrechen + trennen.
     useEffect(() => {
         return () => {
+            globalActiveSessionId = null;
             if (!isMock && !finishingRef.current) {
                 try { conversation.endSession(); } catch (_) { /* noop */ }
                 void abortOralExamSession(state.sessionId);
@@ -319,6 +359,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                     {microphoneBlocked ? (
                         <button
                             onClick={() => {
+                                globalActiveSessionId = null;
                                 startedRef.current = true;
                                 void startLiveSession();
                             }}
@@ -329,6 +370,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                     ) : (
                         <button
                             onClick={() => {
+                                globalActiveSessionId = null;
                                 startedRef.current = true;
                                 void startLiveSession();
                             }}
@@ -513,18 +555,25 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                             Die Prüfung ist noch nicht zu Ende. Wenn du jetzt beendest, wird dein bisheriges
                             Gespräch ausgewertet und die Prüfung kann nicht fortgesetzt werden.
                         </p>
-                        <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+                        <div className="mt-6 flex flex-col gap-2">
                             <button
                                 type="button"
                                 onClick={() => { setShowEndConfirm(false); void finish(); }}
-                                className="w-full rounded-2xl bg-red-500 px-5 py-3 font-black text-white transition-all active:scale-95"
+                                className="w-full rounded-2xl bg-red-500 px-5 py-3 font-black text-white transition-all active:scale-95 hover:bg-red-600"
                             >
-                                Beenden &amp; auswerten
+                                Beenden und bewerten
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setShowEndConfirm(false); void abortAndLeave(); }}
+                                className="w-full rounded-2xl border-2 border-slate-100 bg-white px-5 py-3 font-black text-slate-700 transition-all active:scale-95 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                            >
+                                Beenden ohne Bewertung
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setShowEndConfirm(false)}
-                                className="w-full rounded-2xl border-2 border-slate-100 bg-white px-5 py-3 font-black text-slate-700 transition-all active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                className="w-full rounded-2xl bg-transparent px-5 py-3 font-bold text-slate-500 transition-all active:scale-95 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
                             >
                                 Weiter prüfen
                             </button>

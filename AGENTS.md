@@ -48,6 +48,9 @@ npm run build        # Produktions-Bundle
 npm run preview      # Build lokal prüfen
 
 # Tests (vitest)
+npm run test:oral-exam-entitlement
+npm run test:oral-exam-routing
+npm run test:oral-exam-scenarios
 npm run test:transition-access
 npm run test:question-pipeline
 npm run test:written-regen-pipeline

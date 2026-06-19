@@ -5,7 +5,6 @@ import { useApp } from '../../App';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSubscription } from '../../contexts/SubscriptionContext';
 import { getOralExamEntitlement, listOralExamSessions } from '../../services/oralExam';
-import { isAdminEmail } from '../../utils/userRoles';
 import type { OralExamEntitlement } from '../../types';
 
 export default function ExamSelection() {
@@ -13,7 +12,6 @@ export default function ExamSelection() {
     const { language, toggleLanguage, showLanguageToggle, isPremium, openAuthDialog } = useApp();
     const { user } = useAuth();
     const { subscription, transitionGrant } = useSubscription();
-    const isAdmin = isAdminEmail(user?.email);
 
     const [showWrittenModal, setShowWrittenModal] = useState(false);
     const [oralEntitlement, setOralEntitlement] = useState<OralExamEntitlement | null>(null);
@@ -41,8 +39,9 @@ export default function ExamSelection() {
                     : null;
                 const used = sessions.filter((session) => {
                     if (session.mode !== mode) return false;
-                    if (windowStartsAt && new Date(session.created_at) < new Date(windowStartsAt)) return false;
-                    if (windowEndsAt && new Date(session.created_at) > new Date(windowEndsAt)) return false;
+                    if (!session.connected_at) return false;
+                    if (windowStartsAt && new Date(session.connected_at) < new Date(windowStartsAt)) return false;
+                    if (windowEndsAt && new Date(session.connected_at) > new Date(windowEndsAt)) return false;
                     return true;
                 }).length;
                 const limit = isPremium ? 10 : 1;
@@ -158,8 +157,7 @@ export default function ExamSelection() {
                     </div>
                 </button>
 
-                {/* Mündliche Prüfung (KI) — vorerst nur für Admin sichtbar/testbar */}
-                {isAdmin && (
+                {/* Mündliche Prüfung (KI) */}
                 <button
                     onClick={handleOralExamClick}
                     className="w-full text-left bg-white dark:bg-slate-800 rounded-[24px] p-1 shadow-md border-2 border-violet-100 dark:border-violet-900/30 hover:border-violet-500 dark:hover:border-violet-500 transition-all active:scale-[0.98] group relative overflow-hidden"
@@ -193,7 +191,6 @@ export default function ExamSelection() {
                         </div>
                     </div>
                 </button>
-                )}
 
                 {/* Abgeschlossene Prüfungen */}
                 <button

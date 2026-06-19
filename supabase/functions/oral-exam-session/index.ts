@@ -7,7 +7,7 @@ import { getOralExamEntitlement } from "../_shared/oral-exam-entitlement.ts";
 //  2. Prüfungstickets serverseitig ermitteln (autoritativ — schützt den teuren full_simulation-Modus)
 //  3. Free-Nutzer: 1 Mini-Simulation; Premium: 10 Vollsimulationen pro Zeitraum
 //  4. ElevenLabs Signed URL holen (API-Key bleibt geheim)
-//  5. Danach Session-Zeile anlegen (status=running)
+//  5. Danach Session-Zeile anlegen (status=pending; Ticket zählt erst bei connected_at)
 // Siehe docs/produkt/ki-muendliche-pruefungssimulation-umsetzung.md
 
 const corsHeaders = {
@@ -17,6 +17,8 @@ const corsHeaders = {
 
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY") || "";
 const ELEVENLABS_AGENT_ID = Deno.env.get("ELEVENLABS_AGENT_ID") || "";
+const ELEVENLABS_AGENT_ID_MINI = Deno.env.get("ELEVENLABS_AGENT_ID_MINI") || ELEVENLABS_AGENT_ID;
+const ELEVENLABS_AGENT_ID_FULL = Deno.env.get("ELEVENLABS_AGENT_ID_FULL") || "";
 
 // Admin-Allowlist (gespiegelt zu src/utils/userRoles.ts). Nur Admins dürfen den Modus frei wählen.
 const ADMIN_EMAILS = (Deno.env.get("ADMIN_EMAILS") || "m.almajzoub1@gmail.com")
@@ -28,7 +30,7 @@ function isAdminEmail(email?: string | null): boolean {
 // Dauer-Limits (Sekunden) je Modus — fachlich begrenzt der Agent über Fälle/Rückfragen.
 // Die Zeit ist nur ein technischer Kosten-Backstop.
 const MAX_DURATION_FREE = 180;
-const MAX_DURATION_FULL = 900;
+const MAX_DURATION_FULL = 1200;
 
 interface OralExamScenario {
     id: string;
@@ -172,9 +174,9 @@ async function selectScenario(userId: string, mode: string, requestedFocusTopic:
     return pickRandom(freshPool.length > 0 ? freshPool : pool);
 }
 
-async function fetchElevenLabsSignedUrl(): Promise<string> {
+async function fetchElevenLabsSignedUrl(agentId: string): Promise<string> {
     const res = await fetch(
-        `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${ELEVENLABS_AGENT_ID}`,
+        `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
         { headers: { "xi-api-key": ELEVENLABS_API_KEY } }
     );
     if (!res.ok) {
@@ -192,8 +194,8 @@ serve(async (req) => {
     }
 
     try {
-        if (!ELEVENLABS_API_KEY || !ELEVENLABS_AGENT_ID) {
-            throw new Error("Configuration Error: ELEVENLABS_API_KEY / ELEVENLABS_AGENT_ID missing in Supabase Secrets.");
+        if (!ELEVENLABS_API_KEY || (!ELEVENLABS_AGENT_ID_MINI && !ELEVENLABS_AGENT_ID_FULL)) {
+            throw new Error("Configuration Error: ELEVENLABS_API_KEY or ELEVENLABS_AGENT_ID_MINI/FULL missing in Supabase Secrets.");
         }
 
         // Auth: Nutzer aus JWT auflösen
@@ -214,7 +216,11 @@ serve(async (req) => {
         const focusTopic: string | null = body?.focus_topic ?? null;
         const requestedMode: string | null = body?.requested_mode ?? null;
 
-        const entitlement = await getOralExamEntitlement(supabaseAdmin, user.id);
+        const [entitlement, candidateName] = await Promise.all([
+            getOralExamEntitlement(supabaseAdmin, user.id),
+            getCandidateFirstName(user.id)
+        ]);
+
         if (entitlement.remaining <= 0) {
             return new Response(
                 JSON.stringify(entitlement.isPremium ? { ticketLimitReached: true, entitlement } : { paywallRequired: true, entitlement }),
@@ -229,9 +235,16 @@ serve(async (req) => {
             mode = requestedMode;
         }
         const maxDurationSec = mode === "full_simulation" ? MAX_DURATION_FULL : MAX_DURATION_FREE;
-        const candidateName = await getCandidateFirstName(user.id);
-        const scenario = await selectScenario(user.id, mode, focusTopic);
-        const signedUrl = await fetchElevenLabsSignedUrl();
+
+        const agentId = mode === "full_simulation" ? ELEVENLABS_AGENT_ID_FULL : ELEVENLABS_AGENT_ID_MINI;
+        if (!agentId) {
+            throw new Error(`Configuration Error: ElevenLabs Agent ID for mode "${mode}" is missing in secrets.`);
+        }
+
+        const [scenario, signedUrl] = await Promise.all([
+            selectScenario(user.id, mode, focusTopic),
+            fetchElevenLabsSignedUrl(agentId)
+        ]);
         const sessionSeed = crypto.randomUUID().slice(0, 8);
 
         // Session als 'pending' anlegen: reserviert nur. Ein Ticket zählt erst, wenn die Session
@@ -258,8 +271,8 @@ serve(async (req) => {
                 signedUrl,
                 entitlement: {
                     ...entitlement,
-                    used: entitlement.used + 1,
-                    remaining: Math.max(entitlement.remaining - 1, 0),
+                    used: entitlement.used,
+                    remaining: entitlement.remaining,
                 },
                 dynamicVariables: {
                     mode,
