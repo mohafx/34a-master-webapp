@@ -442,6 +442,8 @@ export default function QuestionView() {
           type: q.type as QuestionType,
           explanationDE: q.explanation_de,
           explanationAR: q.explanation_ar,
+          explanationImageUrl: q.question_explanation_image_url,
+          explanationImageAltDE: q.question_explanation_image_alt_de,
           orderIndex: q.order_index,
           global_order_index: q.global_order_index ?? undefined,
           lessonOrder: q.lesson?.order_index,
@@ -1299,6 +1301,8 @@ export default function QuestionView() {
                           </p>
                           <ExplanationRenderer
                             text={result.question.explanationDE}
+                            imageUrl={result.question.explanationImageUrl}
+                            imageAlt={result.question.explanationImageAltDE}
                           />
                           {language === 'DE_AR' && result.question.explanationAR && (
                             <div className="mt-2 pt-2 border-t border-blue-200 dark:border-blue-800">
@@ -2267,6 +2271,8 @@ export default function QuestionView() {
                           text={currentQuestion.explanationDE}
                           textAR={currentQuestion.explanationAR}
                           language={language}
+                          imageUrl={currentQuestion.explanationImageUrl}
+                          imageAlt={currentQuestion.explanationImageAltDE}
                         />
 
                         {/* Link to Lesson - Only if lessonId is available */}

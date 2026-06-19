@@ -1,7 +1,7 @@
 ---
 title: Datenmodell
 scope: Supabase-Tabellen, types.ts, Preview-Views, RLS
-last_verified: 2026-06-18
+last_verified: 2026-06-19
 ---
 
 # Datenmodell
@@ -34,6 +34,13 @@ Aus `src/services/database.ts` (`supabase.from('…')`) referenziert:
 > Die `_preview`-Tabellen/Views liefern öffentlich sichtbare Inhalte (Free-Tier); die vollständigen
 > `questions`/`flashcards` sind über RLS bzw. Premium-Logik geschützt. Vor Annahmen über
 > Sichtbarkeit immer die zugehörige Migration prüfen.
+
+### Prüfungstickets für mündliche Simulation
+
+- Free-Nutzer haben 1 `free_test_3q`-Session pro Account.
+- Premium-Nutzer haben 10 `full_simulation`-Sessions pro Abo-Zeitraum.
+- Verbrauch wird über gestartete Zeilen in `oral_exam_sessions` gezählt (`mode` + `created_at`), unabhängig davon, ob die Session später `done`, `aborted` oder `evaluation_failed` wird.
+- `subscriptions.current_period_start` und `subscriptions.current_period_end` bilden das Ticketfenster für Stripe-Premium. Für aktive `access_grants` gelten `starts_at`/`ends_at`.
 
 ### Erklärungsgrafiken für Quizfragen
 

@@ -6,6 +6,7 @@ export interface SubscriptionLike {
   status: SubscriptionStatus;
   plan: SubscriptionPlan;
   provider: SubscriptionProvider;
+  current_period_start?: string | null;
   current_period_end: string | null;
 }
 

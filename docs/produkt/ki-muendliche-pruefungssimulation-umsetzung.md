@@ -1,7 +1,7 @@
 ---
 title: KI-Mündliche-Prüfungssimulation — Umsetzung (As-Built) & Phasen
 scope: Produkt / Technische Umsetzung
-status: Phase 5 — Frontend gebaut, Admin-only Soft-Launch, Live-Flow stabilisiert
+status: Phase 4 — Public-Launch-Gating mit Prüfungstickets implementiert
 last_verified: 2026-06-19
 last_updated: 2026-06-19
 ---
@@ -22,9 +22,8 @@ Verifiziert:
   verwaiste `drop_oral_exam_tables.sql`). Beides wurde am 2026-06-18 nachgebaut bzw. aus der
   Live-Umgebung ins Repo zurückgeholt.
 - Der real angewandte Migrations-Timestamp ist `20260616175910` (nicht `20260616000000`).
-- `user_profiles` hat **nicht** `is_premium`/`first_name`/`full_name` — die entsprechenden
-  Premium-/Namens-Pfade in `oral-exam-session` greifen daher erst nach DB-Erweiterung (relevant für
-  den späteren öffentlichen Launch, nicht für den Admin-Test).
+- `user_profiles` hat **nicht** `is_premium`/`first_name`/`full_name`; der öffentliche Launch-Pfad nutzt
+  deshalb `subscriptions`/`access_grants` für Premium und `display_name` als Kandidatenname.
 - `elevenlabs-closer-webhook` im selben Projekt ist eine **fremde, verwaiste** Function (Umzugsfirmen-
   Leads) — kein Teil dieser App.
 
@@ -37,9 +36,9 @@ Verifiziert:
 | 0 | Vision + Daten-/Markt-Recherche | ✅ |
 | 1 | Backend live deployt (Tabelle + 2 Edge Functions + ElevenLabs-Agent + Secrets) | ✅ |
 | 2 | **Frontend gebaut + Backend-Quellcode/Migration ins Repo geholt** | ✅ ← **HIER** (2026-06-18) |
-| 3 | Lokaler Live-Test als Admin (localhost, Mikrofon) | ⏳ |
-| 4 | Öffentlicher Launch (Admin-Gate raus + `user_profiles` erweitern + Prod-Deploy) | ⬜ |
-| 5 | Ausbau: 15-Min-Modus, mehrere Prüfer, kuratierter Szenario-Pool | ⬜ |
+| 3 | Lokaler Live-Test als Admin (localhost, Mikrofon) | ✅ |
+| 4 | Öffentlicher Launch mit Registrierung + Prüfungstickets + Prod-Deploy | ✅ Code vorbereitet / ⏳ Deployment |
+| 5 | Ausbau: UI-Optimierungen, Flashcards/RAG für ElevenLabs, 15-Min-Modus, mehrere Prüfer, kuratierter Szenario-Pool | ⬜ |
 
 ---
 
@@ -47,22 +46,26 @@ Verifiziert:
 
 ```
 Browser (React 19 SPA)
-  /exam → Karte "Mündliche Prüfung" (nur Admin sichtbar) → /oral-exam (AdminGuard)
+  /exam → Karte "Mündliche Prüfung" (öffentlich sichtbar; Gäste → Registrierung) → /oral-exam
   │
-  ├─(1) OralExamIntro → startOralExamSession(focusTopic)
-  │        → POST oral-exam-session (Edge, verify_jwt, Admin-Gate)
-  │        → { sessionId, mode, maxDurationSec, signedUrl, dynamicVariables }
+  ├─(1) OralExamIntro → getOralExamEntitlement()
+  │        → POST oral-exam-entitlement (Edge, verify_jwt)
+  │        → { isPremium, mode, used, limit, remaining, windowEndsAt }
   │
-  ├─(2) OralExamLive (@elevenlabs/react: ConversationProvider + useConversation)
+  ├─(2) Start → startOralExamSession(focusTopic)
+  │        → POST oral-exam-session (Edge, verify_jwt, Prüfungstickets)
+  │        → Signed URL holen → Session anlegen → { sessionId, mode, maxDurationSec, signedUrl, dynamicVariables, entitlement }
+  │
+  ├─(3) OralExamLive (@elevenlabs/react: ConversationProvider + useConversation)
   │        · startSession({ signedUrl, connectionType:'websocket', dynamicVariables })
   │        · Mikro rein / Prüferstimme raus, onConnect→conversationId, onMessage→Live-Transkript
   │        · Timer (maxDurationSec) / "Beenden" / onDisconnect → finish()
   │
-  ├─(3) finish() → evaluateOralExam(sessionId, transcript, durationS, conversationId)
+  ├─(4) finish() → evaluateOralExam(sessionId, transcript, durationS, conversationId)
   │        → POST oral-exam-evaluation (idempotent; Transkript autoritativ von ElevenLabs,
   │          Fallback Client/gespeichertes Transkript; OpenAI Structured Output → speichern)
   │
-  └─(4) OralExamResults (/oral-exam/results/:sessionId) → Score, Themen, Stärken/Lücken,
+  └─(5) OralExamResults (/oral-exam/results/:sessionId) → Score, Themen, Stärken/Lücken,
          Musterantworten, roter Faden, next_step.  OralExamHistory listet vergangene Läufe.
 ```
 
@@ -70,17 +73,18 @@ Browser (React 19 SPA)
 
 **Frontend (`src/`)**
 - Pages: `components/pages/OralExam{Intro,Live,Results,History}.tsx`
-- Service: `services/oralExam.ts` (`startOralExamSession`, `evaluateOralExam`,
+- Service: `services/oralExam.ts` (`getOralExamEntitlement`, `startOralExamSession`, `evaluateOralExam`,
   `retryOralExamEvaluation`, `getOralExamSession`, `listOralExamSessions`, `abortOralExamSession`)
 - Typen: `OralExam*` in `types.ts`
 - Routen: `App.tsx` — `/oral-exam`, `/oral-exam/live`, `/oral-exam/results/:sessionId`,
-  `/oral-exam/history`, **alle in `<AdminGuard>`**
+  `/oral-exam/history`, öffentlich erreichbar; Start erfordert Auth in der Edge Function.
 - Einstieg (ExamSelection): **ein Button** „Schriftliche Prüfungssimulation" öffnet ein Modal
-  (Mini / Voll). Karte „Mündliche Prüfung" erscheint nur wenn `isAdminEmail(user?.email)`.
+  (Mini / Voll). Karte „Mündliche Prüfung" ist öffentlich sichtbar; Gäste öffnen den Registrierungsdialog.
 - Verlauf: `components/pages/WrittenExamHistory.tsx` zeigt **schriftliche + mündliche** Sessions
-  (mündliche Sektion nur für Admin sichtbar). `OralExamHistory.tsx` weiterhin unter
-  `/oral-exam/history` erreichbar (intern).
+  für angemeldete Nutzer. `OralExamHistory.tsx` weiterhin unter `/oral-exam/history` erreichbar.
 - `OralExamIntro.tsx` hat **keinen** „Frühere Durchläufe"-Button mehr.
+- `OralExamIntro.tsx` zeigt statt Admin-Testmodus eine Prüfungsticket-Karte: Free `1/1` Mini,
+  Premium `10/10` Vollsimulationen pro Abo-Zeitraum.
 - `OralExamIntro.tsx` zeigt vor dem Start ein Pflicht-Popup „Für beste Ergebnisse" (ruhiger Raum,
   keine Hintergrundgeräusche, Mikrofon-Zugriff bestätigen). Erst nach „Verstanden, starten" wird die
   Session vorbereitet.
@@ -92,18 +96,37 @@ Browser (React 19 SPA)
 - Dependency: `@elevenlabs/react`
 
 **Backend (`supabase/`)**
-- `functions/oral-exam-session/index.ts`, `functions/oral-exam-evaluation/index.ts`
-  (exakt der live deployte Stand)
+- `functions/oral-exam-entitlement/index.ts`, `functions/oral-exam-session/index.ts`,
+  `functions/oral-exam-evaluation/index.ts`
+- Shared Ticketlogik: `functions/_shared/oral-exam-entitlement.ts`
 - `migrations/20260616175910_create_oral_exam_sessions.sql` (idempotent, = Live-Schema)
+- `migrations/20260619170928_add_subscription_period_start.sql` (`subscriptions.current_period_start`
+  für Premium-Ticketfenster)
 
 ## 4. ElevenLabs-Agent
 - „34a Master – Mündliche Prüfung (**Herr Müller**)", Sprache **de**, Modell `eleven_flash_v2_5`.
 - `agent_id` liegt als Supabase-Secret `ELEVENLABS_AGENT_ID` (nicht im Repo).
-- Dynamic Variables: `mode`, `focus_topic`, `candidate_name`, `session_seed`.
+- Dynamic Variables: `mode`, `focus_topic`, `scenario_id`, `scenario_title`, `scenario_topic`,
+  `scenario_brief`, `scenario_expected`, `candidate_name`, `session_seed`.
 - Prüfer-Name (im Prompt **und** in der UI [`OralExamLive.tsx`]) = **Herr Müller**.
-- Aktueller Agent-Stand (per API gesetzt und verifiziert 2026-06-19): `full_simulation`, 6 Hauptfälle,
-  1-2 Rückfragen, `max_duration_seconds=720`, `temperature=0.7`, abwechslungsreiche Fallauswahl über
-  `{{session_seed}}`. Der alte Modus `full_test_6q` ist entfernt.
+- Aktueller Stand (2026-06-19): `oral-exam-session` wählt ein konkretes Szenario aus einem kuratierten
+  Pool, meidet die letzten Fälle des Nutzers und übergibt es an ElevenLabs. `session_seed` bleibt als
+  zusätzliche Variation für Orte, Namen, Reihenfolge und Nachfragen. Der alte Modus `full_test_6q` ist
+  entfernt.
+- Root Cause für wiederholte gleiche Fallfragen (behoben 2026-06-19): Der live gespeicherte
+  ElevenLabs-Agent hatte noch den alten Prompt (`full_test_6q`, keine `scenario_*`-Variablen,
+  `temperature=0`). Das Backend sendete zwar neue Szenarien, der Agent nutzte sie aber nicht.
+  Der Agent wurde per API aktualisiert: First Message enthält jetzt `{{scenario_brief}}`, der Prompt
+  erzwingt den übergebenen ersten Fall und `temperature=0.7` ist aktiv.
+- Follow-up-Fix (2026-06-19): Premium-Gespräche konnten bei sehr schlechten/kurzen Antworten zu früh
+  enden, weil der Prompt widersprüchlich war („höchstens eine Rückfrage" vs. Premium 1-2 Rückfragen)
+  und die Ende-Regel nicht hart an die Fallanzahl gekoppelt war. Der Agent-Prompt zählt Hauptfälle nun
+  intern: `free_test_3q` endet nach genau 3 Hauptfällen, `full_simulation` nach genau 8 Hauptfällen.
+  Free nutzt maximal 1 Rückfrage pro Hauptfall; Premium nutzt bis zu 3 Rückfragen pro Hauptfall.
+  Bei schlechten Antworten oder „Ich weiß es nicht" darf der Agent nicht abbrechen, sondern muss zum
+  nächsten Hauptfall gehen. Temperature wurde auf `0.45` gesetzt, weil Backend-Szenarien die Variation
+  liefern und der Agent die Zählregeln verlässlicher befolgen soll. Der technische Premium-Backstop
+  liegt jetzt bei 900 Sekunden.
 
 ### 4a. Ein Agent, kein zweiter (Architekturentscheidung 2026-06-18)
 **Bewusst genau EIN Agent** statt getrennter Agenten für Abonnenten/Nicht-Abonnenten. Begründung:
@@ -122,17 +145,16 @@ Die `ENDE`-Sektion des System-Prompts verzweigt nach `{{mode}}`:
 - Der Prompt liegt **nur bei ElevenLabs** (nicht im Repo). Änderungen via
   `PATCH /v1/convai/agents/{agent_id}` mit `conversation_config.agent.prompt.prompt` und dem
   `xi-api-key` (= Secret `ELEVENLABS_API_KEY`, nie committen).
-- Im aktuellen Admin-Soft-Launch ist `mode` immer `full_simulation` → der Premium-Hinweis greift erst nach
-  dem öffentlichen Launch für Free-Nutzer.
+- Im öffentlichen Ticketmodell greift der Premium-Hinweis für Free-Nutzer im Modus `free_test_3q`.
 
-## 4c. Admin-Modus-Auswahl (Test, 2026-06-18)
-Im Admin-Soft-Launch kann der Admin vor dem Start in `OralExamIntro` den Test-Modus wählen
-(**Free** = `free_test_3q` / **Premium** = `full_simulation`), um beide Abläufe inkl. des modus-abhängigen
-Prüfer-Abschlusses zu testen. Mechanik:
-- `startOralExamSession(focusTopic, requestedMode)` schickt `requested_mode` im Body.
-- `oral-exam-session` (v4) honoriert `requested_mode` **nur für Admins**; für alle anderen ergibt sich
-  der Modus weiterhin aus dem Premium-Status. Nach dem öffentlichen Launch ist das Feld für
-  Nicht-Admins wirkungslos (kein Missbrauch möglich).
+## 4c. Prüfungstickets (Public-Launch, 2026-06-19)
+- Gäste sehen die Karte, müssen sich aber registrieren/anmelden, bevor eine Session gestartet wird.
+- Free-Nutzer erhalten **1 Mini-Simulation** (`free_test_3q`, 180 Sekunden).
+- Premium-Nutzer erhalten **10 Vollsimulationen pro Abo-Zeitraum** (`full_simulation`, 900 Sekunden).
+- Ein Ticket wird beim Start reserviert: `oral-exam-session` holt zuerst die ElevenLabs Signed URL und
+  legt danach die Session-Zeile an. Provider-/Secret-Fehler vor der Signed URL verbrauchen kein Ticket.
+- Verbrauch wird über gestartete `oral_exam_sessions` gezählt, nicht nur über erfolgreich ausgewertete
+  Sessions. Abgebrochene Sessions zählen, weil bereits KI-Kosten entstehen können.
 
 ## 4d. Sprech-Animationen (UI, `OralExamLive.tsx`)
 - **Prüfer spricht**: primär über den hörbaren Ausgangspegel `getOutputVolume()` plus SDK-Modus
@@ -144,8 +166,10 @@ Prüfer-Abschlusses zu testen. Mechanik:
 
 ## 4e. Live-Flow-Stabilisierung (2026-06-19)
 - `full_simulation` ist der kanonische Vollmodus; `full_5min` bleibt nur Legacy-kompatibel.
-- `oral-exam-session` sendet pro Session einen zufälligen `session_seed` an ElevenLabs, damit Fälle,
-  Reihenfolge, Orte und Personen variieren.
+- `oral-exam-session` wählt pro Session ein konkretes Szenario und sendet zusätzlich einen zufälligen
+  `session_seed` an ElevenLabs. Ursache für wiederholte gleiche Fälle war, dass vorher nur
+  `focus_topic="alle"` plus Seed gesendet wurde; wenn der Agent-Prompt den Seed nicht stark auswertet,
+  startet er deterministisch mit demselben Fall.
 - Mikrofon-Zugriff wird vor dem ElevenLabs-Start explizit geprüft. Wenn der Browser den Zugriff nicht
   bestätigt, zeigt die UI einen Fehler mit „Mikrofon-Zugriff erneut erlauben".
 - ElevenLabs-Regie-Tags wie `[happy]` werden im Live-Transkript und vor der Auswertung entfernt.
@@ -153,10 +177,12 @@ Prüfer-Abschlusses zu testen. Mechanik:
   ElevenLabs. Gleiche Fragen im Mock sind absichtlich feste Testdaten.
 
 ## 5. Gating
-| Nutzer | Verhalten (Soft-Launch) |
+| Nutzer | Verhalten |
 |---|---|
-| Admin (`m.almajzoub1@gmail.com`) | Voller Zugriff, **Modus frei wählbar** (Free/Premium), unbegrenzt |
-| Alle anderen / ausgeloggt | Karte unsichtbar, `/oral-exam*` → Redirect, Backend `403` |
+| Ausgeloggt | Karte sichtbar; Klick öffnet Registrierung/Login; keine Session wird angelegt |
+| Eingeloggt, Free | 1 Mini-Simulation; danach `paywallRequired` und Paywall |
+| Eingeloggt, Premium | 10 Vollsimulationen im aktuellen Abo-Zeitraum; danach `ticketLimitReached` |
+| Transition-Grant | Zählt wie Premium innerhalb des Grant-Fensters (`starts_at`/`ends_at`) |
 
 ## 6. Auswertungs-JSON (OpenAI)
 `{ overall_score_pct, passed, summary, topic_scores[{topic,score_pct,comment}],
@@ -194,12 +220,12 @@ model_answers[{scenario,musterantwort}], roter_faden[], next_step }`. Bestehensg
 - Migration: `supabase/migrations/20260618210000_oral_exam_audio.sql` (Spalte `audio_path` + Bucket + RLS).
 
 ## 7. Offene Schritte
-- **Phase 3:** Lokaler Live-Test als Admin (localhost, Mikrofon). Logs via Supabase-MCP `get_logs`
-  (edge-function), DB via `execute_sql` auf `oral_exam_sessions`.
-- **Phase 4 (Launch):** Admin-Gate in `oral-exam-session` + `App.tsx` (`AdminGuard`) +
-  `ExamSelection.tsx` (`showOralExam`) entfernen; **vorher** `user_profiles` um `is_premium`/
-  `first_name`/`full_name` erweitern (oder den Premium-/Namens-Pfad auf `subscriptions`/`access_grants`
-  reduzieren). Functions neu deployen, Frontend-Prod-Deploy.
+- **Deployment:** Migration `20260619170928_add_subscription_period_start.sql` anwenden,
+  `oral-exam-entitlement`, `oral-exam-session`, `oral-exam-evaluation` und Stripe-Sync/Webhook-Functions
+  deployen, danach Frontend-Prod-Deploy.
+- **Launch-Test:** Echte Free-Registrierung, 1 Mini-Simulation, Paywall danach; echtes Premium-Konto mit
+  10er-Zähler, Verbrauch nach Start, Blockade bei 0 Tickets.
+- **Später:** UI-Optimierungen nach Nutzungsdaten, Flashcards/RAG für ElevenLabs, kuratierter Szenario-Pool.
 
 ## Verweise
 - **Funktionsweise (vollständige Referenz):** [ki-muendliche-pruefungssimulation-funktionsweise.md](ki-muendliche-pruefungssimulation-funktionsweise.md)

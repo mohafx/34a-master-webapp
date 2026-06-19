@@ -1,9 +1,12 @@
 import React, { useMemo } from "react";
+import { useDevPanel } from "../../devpanel/DevPanelContext";
 
 interface ExplanationRendererProps {
   text: string;
   textAR?: string;
   language?: string;
+  imageUrl?: string;
+  imageAlt?: string;
 }
 
 interface ParsedSection {
@@ -259,7 +262,8 @@ function renderContent(content: string, dir: "ltr" | "rtl" = "ltr") {
   );
 }
 
-export function ExplanationRenderer({ text, textAR, language = "DE" }: ExplanationRendererProps) {
+export function ExplanationRenderer({ text, textAR, language = "DE", imageUrl, imageAlt }: ExplanationRendererProps) {
+  const { showExplanationImages } = useDevPanel();
   const isArabicEnabled = language === "DE_AR" && !!textAR;
 
   const sectionsDE = useMemo(() => parseSections(text), [text]);
@@ -275,6 +279,16 @@ export function ExplanationRenderer({ text, textAR, language = "DE" }: Explanati
   return (
     <div className="flex flex-col gap-4">
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden min-h-[100px]">
+        {imageUrl && showExplanationImages && (
+          <div className="p-3 sm:p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900">
+            <img
+              src={imageUrl}
+              alt={imageAlt || "Infografik zur Erklärung"}
+              loading="lazy"
+              className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white shadow-sm"
+            />
+          </div>
+        )}
         {sectionsDE.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-sm italic">Kein Inhalt für diesen Abschnitt verfügbar.</div>
         ) : (

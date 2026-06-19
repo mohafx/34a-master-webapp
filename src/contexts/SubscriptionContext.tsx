@@ -18,6 +18,7 @@ export interface Subscription {
   status: 'free' | 'active' | 'canceled' | 'past_due' | 'trialing';
   plan: 'free' | 'monthly' | '6months';
   provider: 'stripe' | 'apple' | 'google';
+  current_period_start?: string | null;
   current_period_end: string | null;
   created_at?: string;
   provider_customer_id?: string;

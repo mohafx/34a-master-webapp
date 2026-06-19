@@ -412,6 +412,7 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
         customerId: subscription.customer as string,
         status: effectiveStatus,
         plan: subscription.metadata?.plan_type || 'monthly',
+        currentPeriodStart: new Date(subscription.current_period_start * 1000),
         currentPeriodEnd: new Date(subscription.current_period_end * 1000),
     });
 
@@ -484,6 +485,7 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
             customerId: subscription.customer as string,
             status: 'active', // Renewal successful = active
             plan: subscription.metadata?.plan_type || 'monthly',
+            currentPeriodStart: new Date(subscription.current_period_start * 1000),
             currentPeriodEnd: new Date(subscription.current_period_end * 1000),
         });
 
@@ -578,6 +580,7 @@ async function upsertSubscription({
     customerId,
     status,
     plan,
+    currentPeriodStart,
     currentPeriodEnd,
 }: {
     userId: string;
@@ -585,6 +588,7 @@ async function upsertSubscription({
     customerId: string;
     status: string;
     plan: string;
+    currentPeriodStart: Date;
     currentPeriodEnd: Date;
 }) {
     // Query existing subscription
@@ -616,6 +620,7 @@ async function upsertSubscription({
             provider: 'stripe',
             provider_customer_id: customerId,
             provider_subscription_id: subscriptionId,
+            current_period_start: currentPeriodStart.toISOString(),
             current_period_end: currentPeriodEnd.toISOString(),
             updated_at: new Date().toISOString(),
         }).eq('id', existing.id);
@@ -633,6 +638,7 @@ async function upsertSubscription({
             provider: 'stripe',
             provider_customer_id: customerId,
             provider_subscription_id: subscriptionId,
+            current_period_start: currentPeriodStart.toISOString(),
             current_period_end: currentPeriodEnd.toISOString(),
         });
 

@@ -46,10 +46,11 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   // localStorage cache keys
-  const CACHE_KEY_MODULES = '34a_cache_modules';
-  const CACHE_KEY_QUESTIONS = '34a_cache_questions';
-  const CACHE_KEY_FLASHCARDS = '34a_cache_flashcards';
-  const CACHE_TIMESTAMP_KEY = '34a_cache_timestamp';
+  const CACHE_SCHEMA_VERSION = 'v2';
+  const CACHE_KEY_MODULES = `34a_cache_${CACHE_SCHEMA_VERSION}_modules`;
+  const CACHE_KEY_QUESTIONS = `34a_cache_${CACHE_SCHEMA_VERSION}_questions`;
+  const CACHE_KEY_FLASHCARDS = `34a_cache_${CACHE_SCHEMA_VERSION}_flashcards`;
+  const CACHE_TIMESTAMP_KEY = `34a_cache_${CACHE_SCHEMA_VERSION}_timestamp`;
   const CACHE_MAX_AGE_MS = 1000 * 60 * 60; // 1 hour cache validity
 
   const loadFromCache = (): { modules: Module[] | null; questions: Question[] | null; flashcards: any[] | null } => {
@@ -109,6 +110,8 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
       })),
       explanationDE: q.explanation_de || '',
       explanationAR: q.explanation_ar,
+      explanationImageUrl: q.question_explanation_image_url || q.explanationImageUrl,
+      explanationImageAltDE: q.question_explanation_image_alt_de || q.explanationImageAltDE,
       difficulty: q.difficulty,
       orderIndex: q.order_index ?? 0,
       global_order_index: q.global_order_index ?? undefined,
@@ -212,6 +215,8 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
           answers: [], // LOCKED / HIDDEN
           explanationDE: '',
           explanationAR: '',
+          explanationImageUrl: p.question_explanation_image_url || p.explanationImageUrl,
+          explanationImageAltDE: p.question_explanation_image_alt_de || p.explanationImageAltDE,
           isFree: p.is_free || p.isFree || false
         };
       });
@@ -315,8 +320,6 @@ export function useDataCache() {
   }
   return context;
 }
-
-
 
 
 

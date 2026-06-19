@@ -104,3 +104,7 @@ local_archive/
 *.avi
 public/Videos/
 app-src/
+
+# IDE / tool config
+.claude/
+

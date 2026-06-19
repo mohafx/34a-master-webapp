@@ -102,6 +102,7 @@ serve(async (req) => {
                     customerId: customer.id,
                     status: effectiveStatus,
                     plan: planType,
+                    currentPeriodStart: new Date(activeSub.current_period_start * 1000),
                     currentPeriodEnd: new Date(activeSub.current_period_end * 1000)
                 });
 
@@ -137,6 +138,7 @@ serve(async (req) => {
                     customerId: customer.id,
                     status: 'canceled',
                     plan: planType,
+                    currentPeriodStart: new Date(canceledSub.current_period_start * 1000),
                     currentPeriodEnd: new Date(canceledSub.current_period_end * 1000)
                 });
 
@@ -202,6 +204,7 @@ serve(async (req) => {
                             customerId: customer.id,
                             status: 'active',
                             plan: '6months',
+                            currentPeriodStart: created,
                             currentPeriodEnd: expiresAt
                         });
 
@@ -312,6 +315,7 @@ async function fallbackCheckByReferenceId(userId: string, userEmail: string) {
                         customerId: (session.customer as string) || 'no_customer',
                         status: 'active',
                         plan: planType,
+                        currentPeriodStart: created,
                         currentPeriodEnd: expiresAt
                     });
 
@@ -376,6 +380,7 @@ async function upsertSubscription({
     customerId,
     status,
     plan,
+    currentPeriodStart,
     currentPeriodEnd,
 }: {
     userId: string;
@@ -384,6 +389,7 @@ async function upsertSubscription({
     customerId: string;
     status: string;
     plan: string;
+    currentPeriodStart: Date;
     currentPeriodEnd: Date;
 }) {
     const { data: existing } = await supabaseAdmin
@@ -400,6 +406,7 @@ async function upsertSubscription({
             provider_customer_id: customerId,
             provider_subscription_id: subscriptionId,
             user_email: userEmail,
+            current_period_start: currentPeriodStart.toISOString(),
             current_period_end: currentPeriodEnd.toISOString(),
             updated_at: new Date().toISOString(),
         }).eq('id', existing.id);
@@ -412,6 +419,7 @@ async function upsertSubscription({
             provider: 'stripe',
             provider_customer_id: customerId,
             provider_subscription_id: subscriptionId,
+            current_period_start: currentPeriodStart.toISOString(),
             current_period_end: currentPeriodEnd.toISOString(),
         });
     }

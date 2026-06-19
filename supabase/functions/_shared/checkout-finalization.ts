@@ -90,6 +90,7 @@ async function upsertSubscription({
     customerId,
     status,
     plan,
+    currentPeriodStart,
     currentPeriodEnd,
 }: {
     supabaseAdmin: SupabaseClient;
@@ -99,6 +100,7 @@ async function upsertSubscription({
     customerId: string;
     status: string;
     plan: string;
+    currentPeriodStart: Date;
     currentPeriodEnd: Date;
 }) {
     const { data: existing, error: selectError } = await supabaseAdmin
@@ -118,6 +120,7 @@ async function upsertSubscription({
         provider_customer_id: customerId || "unknown",
         provider_subscription_id: subscriptionId,
         user_email: userEmail,
+        current_period_start: currentPeriodStart.toISOString(),
         current_period_end: currentPeriodEnd.toISOString(),
         updated_at: new Date().toISOString(),
     };
@@ -306,6 +309,7 @@ export async function finalizePaidCheckoutSession({
             customerId: getStripeId(session.customer),
             status: "active",
             plan,
+            currentPeriodStart: new Date(session.created * 1000),
             currentPeriodEnd,
         });
     } else if (session.mode === "subscription" && session.subscription) {
@@ -324,6 +328,7 @@ export async function finalizePaidCheckoutSession({
             customerId: getStripeId(subscription.customer),
             status: effectiveStatus,
             plan: session.metadata?.plan_type || subscription.metadata?.plan_type || "monthly",
+            currentPeriodStart: new Date(subscription.current_period_start * 1000),
             currentPeriodEnd: new Date(subscription.current_period_end * 1000),
         });
     }

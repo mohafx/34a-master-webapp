@@ -1,7 +1,7 @@
 ---
 title: Supabase Edge Functions
 scope: Katalog, Zweck, Secrets, Deploy
-last_verified: 2026-06-15
+last_verified: 2026-06-19
 ---
 
 # Supabase Edge Functions
@@ -25,9 +25,10 @@ Code liegt in `supabase/functions/_shared/`.
 | `ai-proxy` | Proxy zu Google AI (Schutz des API-Keys) | `GOOGLE_AI_API_KEY` |
 | `question-explanation-pipeline` | Erklärungen zu Fragen generieren | `GOOGLE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `written-exam-regeneration-pipeline` | Schriftliche-Prüfung-Fragen regenerieren | `GOOGLE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
-| `oral-exam-session` | Mündliche Prüfung starten: Auth + Admin-Gate (Soft-Launch) + Modus/Premium + Session anlegen + ElevenLabs Signed URL holen | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `SUPABASE_SERVICE_ROLE_KEY` |
+| `oral-exam-entitlement` | Prüfungstickets für die mündliche Simulation laden, ohne eine Session zu starten | `SUPABASE_SERVICE_ROLE_KEY` |
+| `oral-exam-session` | Mündliche Prüfung starten: Auth + Prüfungstickets durchsetzen + ElevenLabs Signed URL holen + Session anlegen | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `oral-exam-evaluation` | Transkript (ElevenLabs, mit Client-Fallback) per OpenAI bewerten + Ergebnis speichern (idempotent) | `OPENAI_API_KEY`, `OPENAI_MODEL`, `ELEVENLABS_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
-| `_shared/` | Geteilter Code: `checkout-finalization.ts`, `posthog.ts` | — |
+| `_shared/` | Geteilter Code: `checkout-finalization.ts`, `oral-exam-entitlement.ts`, `posthog.ts` | — |
 
 > ⚠️ In diesem Supabase-Projekt liegt außerdem eine **fremde, verwaiste** Function
 > `elevenlabs-closer-webhook` (Umzugsfirmen-Lead-System, `closer_*`-Tabellen existieren nicht) —

@@ -98,6 +98,7 @@ Verwandte menschorientierte Docs (Gesamtsystem, im Eltern-Ordner): `../docs/SYST
 | [ki-muendliche-pruefungssimulation-funktionsweise.md](docs/produkt/ki-muendliche-pruefungssimulation-funktionsweise.md) | **Mündliche Prüfung — vollständige Funktions-/Bewertungs-Referenz** (Ablauf, ElevenLabs+Gemini, Datenmodell, Gating, Secrets, Betrieb). Start hier. |
 | [ki-muendliche-pruefungssimulation-umsetzung.md](docs/produkt/ki-muendliche-pruefungssimulation-umsetzung.md) | As-Built, Phasen & Launch-Checkliste |
 | [ki-muendliche-pruefungssimulation.md](docs/produkt/ki-muendliche-pruefungssimulation.md) | Vision/Produkt-Spec |
+| [projektstatus-und-roadmap.md](docs/produkt/projektstatus-und-roadmap.md) | **Projektstatus und Roadmap** — Festhalten des aktuellen Entwicklungsstands und anstehender Roadmap-Punkte. |
 
 ## Aufräumen (erledigt 2026-06-15)
 
@@ -110,4 +111,5 @@ Verwandte menschorientierte Docs (Gesamtsystem, im Eltern-Ordner): `../docs/SYST
 - ✅ **Inhaltsfehler behoben (2026-06-18):** Finderlohn § 971 BGB auf `MULTIPLE_CHOICE` geändert, Geldbörsen-Fund im Park auf Antwort D geändert samt neuer Erklärung, Selbsthilfe-Aussagen auf `SINGLE_CHOICE` geändert.
 - ✅ **KI-Mündliche-Prüfungssimulation gebaut (2026-06-18):** Frontend vollständig (4 Pages, Service, Typen, Routen), Backend-Quellcode ins Repo geholt, Docs erstellt. Admin-only (AdminGuard + isAdminEmail, 3 Ebenen). ExamSelection: ein Schriftlich-Button mit Modal (Mini/Voll). Abgeschlossene Prüfungen zeigt schriftlich + mündlich. Frühere-Durchläufe-Button aus OralExamIntro entfernt.
 - ✅ **Mündliche Prüfung erweitert (2026-06-18):** Prüfer „Herr Müller", Admin-Modus-Wahl (Free/Premium), Nutzer-Sprech-Animation, modus-abhängiger Premium-Hinweis im ElevenLabs-Prompt. Auswertung (oral-exam-evaluation v4): KI-Gesamt-Zusammenfassung + Pro-Antwort-Bewertung (Score/verdict/Empfehlung) im `feedback`-JSON; vollständiges Gesprächs-Audio serverseitig von ElevenLabs in privatem Bucket `oral-exam-audio` (`audio_path`, Migration `20260618210000`). Ursache des „Fehler nach jeder Session": leeres Transkript (simulierte Dev-Nutzer ohne echtes JWT) — KI war stets korrekt angebunden.
+- ✅ **Mündliche Prüfung & Verlauf optimiert (2026-06-19):** Fehler beim Klick auf „Auswertung erneut versuchen“ in `OralExamResults.tsx` behoben (React-Router-State-Sync-Bug gelöst). Verlauf (`WrittenExamHistory.tsx`) umgestaltet: Statistikkarten aus dem dunklen Header entfernt, stattdessen eine Trophäen-Karte eingeführt. Darunter exklusive, interaktive Filter-Buttons („Schriftlich“ vs. „Mündlich“) mit Beitragszähler implementiert.
 - ℹ️ **`.gitignore`** deckt `dist/`, `node_modules/` und `app-src/` bereits ab — keine Änderung nötig.

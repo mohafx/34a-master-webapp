@@ -1,7 +1,7 @@
 ---
 title: KI-Mündliche-Prüfungssimulation — Funktionsweise (vollständige Referenz)
 scope: Produkt / Technik — wie es funktioniert & bewertet
-status: aktiv (Admin-only Soft-Launch)
+status: aktiv (Public-Launch-Gating mit Prüfungstickets)
 last_verified: 2026-06-19
 ---
 
@@ -33,9 +33,10 @@ Zwei KI-Bausteine, klar getrennt:
 ## 2. Nutzer-Ablauf (User Journey)
 
 ```
-/exam  ──(Admin)──▶  Karte "Mündliche Prüfung"  ──▶  /oral-exam (Intro)
+/exam  ──▶  Karte "Mündliche Prüfung"  ──▶  Gast: Registrierung/Login
+   │                                      └─▶  Eingeloggt: /oral-exam (Intro)
    │
-   │  Intro: Kurzinfo + Test-Modus-Wahl (Free/Premium, Admin) + "Mündliche Prüfung starten" (alle Themen)
+   │  Intro: Kurzinfo + Prüfungstickets + "Mündliche Prüfung starten" (alle Themen)
    │  Vor dem Start: Pflicht-Popup zu ruhigem Raum, Hintergrundgeräuschen und Mikrofon-Zugriff
    ▼
 /oral-exam/live
@@ -61,15 +62,21 @@ Zwei KI-Bausteine, klar getrennt:
 Browser (React 19 SPA)                         Supabase Edge (Deno)            Externe KI
 ──────────────────────                         ────────────────────           ──────────
 OralExamIntro
+  getOralExamEntitlement()
+     └─ supabase.functions.invoke ───────────▶ oral-exam-entitlement
+                                                 · JWT prüfen (verify_jwt)
+                                                 · Premium/Ticketfenster bestimmen
+                                                 · Verbrauch zählen
+     ◀── { entitlement: { isPremium, mode, used, limit, remaining, windowEndsAt } }
+
   startOralExamSession(focusTopic)
      └─ supabase.functions.invoke ───────────▶ oral-exam-session
                                                  · JWT prüfen (verify_jwt)
-                                                 · Admin-Gate (Soft-Launch)
-                                                 · Modus/Premium bestimmen
-                                                 · Zeile in oral_exam_sessions (running)
+                                                 · Prüfungstickets autoritativ prüfen
                                                  · Signed URL holen ──────────▶ ElevenLabs
                                                                                  get-signed-url
-     ◀── { sessionId, mode, maxDurationSec, signedUrl, dynamicVariables inkl. session_seed } ──┘
+                                                 · Zeile in oral_exam_sessions (running)
+     ◀── { sessionId, mode, maxDurationSec, signedUrl, dynamicVariables inkl. session_seed, entitlement } ──┘
 
 OralExamLive (@elevenlabs/react)
   useConversation.startSession({ signedUrl, connectionType:'websocket', dynamicVariables })
@@ -100,9 +107,40 @@ Webhook-Konfiguration.
 
 ---
 
-## 4. Schritt 1 — `oral-exam-session` (Gespräch starten)
+## 4. Schritt 1 — Prüfungstickets laden und Gespräch starten
 
-Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/functions/oral-exam-session/index.ts) · `verify_jwt = true`
+Dateien:
+- [`supabase/functions/oral-exam-entitlement/index.ts`](../../supabase/functions/oral-exam-entitlement/index.ts) · `verify_jwt = true`
+- [`supabase/functions/oral-exam-session/index.ts`](../../supabase/functions/oral-exam-session/index.ts) · `verify_jwt = true`
+- Shared: [`supabase/functions/_shared/oral-exam-entitlement.ts`](../../supabase/functions/_shared/oral-exam-entitlement.ts)
+
+### `oral-exam-entitlement`
+
+Lädt den UI-Status, ohne eine ElevenLabs-Session anzulegen.
+
+**Erfolg (`200`):**
+```json
+{
+  "entitlement": {
+    "isPremium": true,
+    "mode": "full_simulation",
+    "used": 2,
+    "limit": 10,
+    "remaining": 8,
+    "windowStartsAt": "2026-06-01T00:00:00.000Z",
+    "windowEndsAt": "2026-07-01T00:00:00.000Z"
+  }
+}
+```
+
+**Regeln:**
+- Gäste bekommen `401 {error:"unauthorized"}`; das Frontend öffnet Registrierung/Login.
+- Free-Nutzer: Limit 1, Modus `free_test_3q`.
+- Premium-Nutzer: Limit 10, Modus `full_simulation`, gezählt im Abo-Zeitraum
+  `subscriptions.current_period_start` bis `current_period_end`.
+- Aktive `access_grants` zählen wie Premium im Grant-Fenster `starts_at` bis `ends_at`.
+
+### `oral-exam-session`
 
 **Request** (`POST`, JWT im `Authorization`-Header — von `supabase.functions.invoke` automatisch):
 ```json
@@ -114,25 +152,35 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 
 **Ablauf serverseitig:**
 1. **Auth:** Nutzer aus JWT auflösen → kein Nutzer ⇒ `401 {error:"unauthorized"}`.
-2. **Admin-Gate (Soft-Launch):** Nur `m.almajzoub1@gmail.com` darf ⇒ sonst `403 {error:"feature_not_available"}`.
-3. **Premium/Modus:** Admin darf den Modus explizit wählen (`requested_mode` = `free_test_3q`/`full_simulation`,
-   für Tests beider Abläufe); sonst Admin ⇒ `full_simulation`. (Für späteren öffentlichen Launch: `isUserPremium()`
-   prüft `subscriptions`, `user_profiles.is_premium`, aktive `access_grants`; `requested_mode` ist für
-   Nicht-Admins wirkungslos.)
-4. **Free-Gating:** Nicht-Premium mit bereits 1 abgeschlossenem Gratis-Test ⇒ `200 {paywallRequired:true}`.
-5. **Session anlegen:** Zeile in `oral_exam_sessions` mit `status='running'`.
-6. **Signed URL:** von ElevenLabs holen (`xi-api-key` bleibt serverseitig).
-7. **Session-Seed:** zufälliger `session_seed` wird erzeugt und als Dynamic Variable an ElevenLabs
-   übergeben, damit neue Sessions andere Fälle/Reihenfolgen nutzen.
+2. **Prüfungstickets:** gleiche Logik wie `oral-exam-entitlement`.
+3. **Limit erreicht:** Free ⇒ `200 {paywallRequired:true, entitlement}`; Premium ⇒
+   `200 {ticketLimitReached:true, entitlement}`.
+4. **Signed URL:** von ElevenLabs holen (`xi-api-key` bleibt serverseitig).
+5. **Session anlegen:** Zeile in `oral_exam_sessions` mit `status='running'`. Das Ticket ist damit verbraucht.
+6. **Fallauswahl:** Das Backend wählt ein konkretes Szenario aus dem kuratierten Pool, meidet die
+   letzten Fälle dieses Nutzers und übergibt `scenario_*` plus `focus_topic` an ElevenLabs.
+7. **Session-Seed:** zusätzlicher zufälliger `session_seed` wird erzeugt und als Dynamic Variable an
+   ElevenLabs übergeben, damit Reihenfolge, Orte und Nachfragen weiter variieren können.
 
 **Erfolg (`200`):**
 ```json
 {
   "sessionId": "uuid",
   "mode": "full_simulation",            // | "free_test_3q"
-  "maxDurationSec": 720,          // 720 (voll) | 180 (free)
+  "maxDurationSec": 900,          // 900 (voll) | 180 (free)
   "signedUrl": "wss://…",
-  "dynamicVariables": { "mode": "full_simulation", "focus_topic": "alle", "candidate_name": "Max", "session_seed": "a1b2c3d4" }
+  "entitlement": { "isPremium": true, "used": 3, "limit": 10, "remaining": 7, "windowEndsAt": "…" },
+  "dynamicVariables": {
+    "mode": "full_simulation",
+    "focus_topic": "Zutrittskontrolle / Hausrecht: Ein Besucher möchte ...",
+    "scenario_id": "zutritt-ohne-ausweis",
+    "scenario_title": "Zutritt ohne Ausweis",
+    "scenario_topic": "Zutrittskontrolle / Hausrecht",
+    "scenario_brief": "Ein Besucher möchte in ein bewachtes Objekt ...",
+    "scenario_expected": "Hausrecht anwenden, Zutritt verweigern ...",
+    "candidate_name": "Max",
+    "session_seed": "a1b2c3d4"
+  }
 }
 ```
 
@@ -140,22 +188,24 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 | Modus | Dauer-Limit (Client-Timer) | Wer |
 |---|---|---|
 | `free_test_3q` | 180 s | eingeloggt, ohne Premium (1× gratis) |
-| `full_simulation` | 720 s | Premium / Admin |
+| `full_simulation` | 900 s | Premium (10× pro Abo-Zeitraum) |
 
-> Echte Kosten-Backstops: Client-Timer **und** Max-Dauer des ElevenLabs-Agents (720 s).
+> Echte Kosten-Backstops: Client-Timer **und** Max-Dauer des ElevenLabs-Agents (900 s).
+> Tickets werden beim Start verbraucht, nicht erst bei erfolgreicher Auswertung.
 
 ---
 
 ## 5. Die Sprach-KI — ElevenLabs Agent „Herr Müller"
 
 - **Conversational-AI-Agent** bei ElevenLabs (Voice rein/raus, Turn-Taking, Barge-in).
-- Sprache **Deutsch**, Modell `eleven_flash_v2_5` (niedrige Latenz), Max-Dauer 720 s als Kosten-Backstop.
+- Sprache **Deutsch**, Modell `eleven_flash_v2_5` (niedrige Latenz), Max-Dauer 900 s als Kosten-Backstop.
 - **`agent_id` ist KEIN Repo-Wert** — liegt als Supabase-Secret `ELEVENLABS_AGENT_ID`.
 - **Dynamic Variables** (vom Backend gesetzt, im Agent-Prompt nutzbar): `mode`, `focus_topic`,
+  `scenario_id`, `scenario_title`, `scenario_topic`, `scenario_brief`, `scenario_expected`,
   `candidate_name`, `session_seed` → erlauben Personalisierung, Modus-abhängiges Verhalten
-  (3 Fälle vs. volle Simulation) und abwechslungsreiche Fallauswahl pro Session.
-- Aktueller Agent-Stand (verifiziert 2026-06-19): `full_simulation`, 6 Hauptfälle, 1-2 Rückfragen,
-  `temperature=0.7`, `max_duration_seconds=720`, abwechslungsreiche Szenarien per `{{session_seed}}`.
+  (Mini vs. volle Simulation) und konkrete abwechslungsreiche Fallauswahl pro Session.
+- Aktueller Agent-Stand (2026-06-19): Backend wählt ein Szenario und meidet Wiederholungen; der Agent
+  bekommt zusätzlich `{{session_seed}}` für Variation bei Reihenfolge, Orten und Nachfragen.
 - **Rolle des Agents:** stellt praxisnahe Fallbeispiele, fragt dynamisch nach („Warum?", „Und wenn …?"),
   benotet **nicht laut** (Bewertung passiert separat in Schritt 3), beendet neutral.
 
@@ -283,19 +333,16 @@ Service-Role-Key und umgehen RLS bewusst.)
 
 ## 8. Gating-Übersicht
 
-| Nutzer | Heute (Admin-only Soft-Launch) |
+| Nutzer | Verhalten |
 |---|---|
-| Admin (`m.almajzoub1@gmail.com`) | Karte sichtbar; voller Zugriff `full_simulation`, unbegrenzt |
-| Eingeloggt, kein Admin | Karte **unsichtbar**; `/oral-exam*` → Redirect; Backend `403 feature_not_available` |
-| Ausgeloggt | wie oben (kein Zugriff) |
+| Ausgeloggt | Karte sichtbar; Klick öffnet Registrierung/Login; Backend startet keine Session |
+| Eingeloggt, Free | 1 Mini-Simulation (`free_test_3q`); danach `paywallRequired` |
+| Eingeloggt, Premium | 10 Vollsimulationen (`full_simulation`) pro Abo-Zeitraum; danach `ticketLimitReached` |
+| Aktiver Transition-Grant | Wie Premium; Ticketfenster aus `starts_at`/`ends_at` |
 
-Das Gating ist an **drei Stellen** verankert (alle drei müssen für den öffentlichen Launch fallen):
-1. **Frontend-Karte:** `showOralExam = isAdminEmail(user?.email)` in [`ExamSelection.tsx`](../../src/components/pages/ExamSelection.tsx)
-2. **Routen:** `<AdminGuard>` um `/oral-exam*` in [`App.tsx`](../../src/App.tsx)
-3. **Backend:** `ADMIN_EMAILS`-Check in `oral-exam-session`
-
-Die Logik für den **öffentlichen** Betrieb (1 Gratis-Test → Paywall, Premium = `full_simulation`) ist bereits
-eingebaut und greift automatisch, sobald das Admin-Gate entfernt wird.
+Das Gating ist serverseitig autoritativ in `oral-exam-session`; die UI spiegelt den Status aus
+`oral-exam-entitlement`. Die Karte in [`ExamSelection.tsx`](../../src/components/pages/ExamSelection.tsx)
+ist öffentlich sichtbar. Die Routen `/oral-exam*` sind nicht mehr in `<AdminGuard>`.
 
 ---
 
@@ -303,16 +350,16 @@ eingebaut und greift automatisch, sobald das Admin-Gate entfernt wird.
 
 | Datei | Rolle |
 |---|---|
-| [`src/components/pages/OralExamIntro.tsx`](../../src/components/pages/OralExamIntro.tsx) | Einstieg, Test-Modus-Wahl (Free/Premium), Start; behandelt `feature_not_available`/`paywallRequired` |
+| [`src/components/pages/OralExamIntro.tsx`](../../src/components/pages/OralExamIntro.tsx) | Einstieg, Prüfungsticket-Karte, Start; behandelt `paywallRequired`/`ticketLimitReached` |
 | [`src/components/pages/OralExamLive.tsx`](../../src/components/pages/OralExamLive.tsx) | Live-Gespräch (ElevenLabs), Mikro, Timer, Transkript, Sprech-Animationen, `finish()` |
 | [`src/components/pages/OralExamResults.tsx`](../../src/components/pages/OralExamResults.tsx) | Auswertung (Score, KI-Zusammenfassung, Pro-Antwort-Bewertung, Audio-Player, Themen-Balken, Stärken/Lücken, Musterantworten, roter Faden) + Fehlerzustand mit Retry |
 | [`src/components/pages/OralExamHistory.tsx`](../../src/components/pages/OralExamHistory.tsx) | Verlauf der eigenen Durchläufe |
-| [`src/services/oralExam.ts`](../../src/services/oralExam.ts) | API: `startOralExamSession`, `evaluateOralExam`, `getOralExamSession`, `listOralExamSessions`, `abortOralExamSession`, `getOralExamAudioUrl` + Fehlerklassen |
+| [`src/services/oralExam.ts`](../../src/services/oralExam.ts) | API: `getOralExamEntitlement`, `startOralExamSession`, `evaluateOralExam`, `getOralExamSession`, `listOralExamSessions`, `abortOralExamSession`, `getOralExamAudioUrl` + Fehlerklassen |
 | [`src/types.ts`](../../src/types.ts) | `OralExam*`-Typen + `ORAL_EXAM_FOCUS_TOPICS` |
-| [`src/components/pages/ExamSelection.tsx`](../../src/components/pages/ExamSelection.tsx) | Einstiegskarte (Admin-gated) |
-| [`src/App.tsx`](../../src/App.tsx) | Routen (lazy, in `<AdminGuard>`) |
+| [`src/components/pages/ExamSelection.tsx`](../../src/components/pages/ExamSelection.tsx) | Öffentliche Einstiegskarte; Gäste → Registrierung |
+| [`src/App.tsx`](../../src/App.tsx) | Routen (lazy, öffentlich für `/oral-exam*`) |
 | [`src/contexts/PostHogProvider.tsx`](../../src/contexts/PostHogProvider.tsx) | Analytics-Events |
-| Reuse | [`isAdminEmail`](../../src/utils/userRoles.ts), [`AdminGuard`](../../src/components/pages/admin/AdminGuard.tsx) |
+| Reuse | App-Kontext für Auth/Paywall, `SubscriptionContext` für Frontend-Premiumanzeige |
 
 Dependency: `@elevenlabs/react` (Hook `useConversation` + `ConversationProvider`).
 
@@ -338,7 +385,7 @@ Dependency: `@elevenlabs/react` (Hook `useConversation` + `ConversationProvider`
 | `ELEVENLABS_AGENT_ID` | `oral-exam-session` | welcher Agent (Herr Müller) |
 | `OPENAI_API_KEY` | `oral-exam-evaluation` | OpenAI-Bewertung |
 | `OPENAI_MODEL` | `oral-exam-evaluation` | optional, Default `gpt-4.1` |
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | beide | DB-Zugriff / Auth |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | oral-Functions | DB-Zugriff / Auth |
 | `ALLOWED_ORIGIN` | beide | CORS |
 
 Status: live gesetzt und funktionsfähig (belegt durch erfolgreiche Session-Zeilen in der DB).
@@ -347,8 +394,9 @@ Status: live gesetzt und funktionsfähig (belegt durch erfolgreiche Session-Zeil
 
 ## 12. Betrieb & Fehlersuche
 
-**Lokaler Admin-Test:** `npm run dev` → als `m.almajzoub1@gmail.com` einloggen → `/exam` →
-„Mündliche Prüfung" → Mikro erlauben → sprechen → beenden → Auswertung.
+**Lokaler Launch-Test:** `npm run dev` → Free-Account registrieren → `/exam` →
+„Mündliche Prüfung" → Mini-Test starten → danach Paywall prüfen. Zusätzlich Premium-Account mit
+10er-Ticketstatus testen.
 
 **Diagnose via Supabase-MCP:**
 - Edge-Logs: `get_logs` (Service `edge-function`) für `oral-exam-session` / `oral-exam-evaluation`.
@@ -358,11 +406,12 @@ Status: live gesetzt und funktionsfähig (belegt durch erfolgreiche Session-Zeil
 **Häufige Fälle:**
 | Symptom | Ursache / Lösung |
 |---|---|
-| `403 feature_not_available` | Kein Admin — erwartet im Soft-Launch |
-| `paywallRequired` | Nicht-Premium nach Gratis-Test (öffentlicher Launch) |
+| `401 unauthorized` | Gast oder abgelaufene Session — Registrierung/Login öffnen |
+| `paywallRequired` | Free-Nutzer nach Gratis-Test |
+| `ticketLimitReached` | Premium-Nutzer hat 10 Tickets im aktuellen Abo-Zeitraum verbraucht |
 | Kein Ton / keine Verbindung | Mikro-Freigabe verweigert; `ELEVENLABS_*`-Secrets prüfen; `signedUrl` abgelaufen |
 | Gleiche Fragen im Dev-Mock | Erwartet: `?devMock=1` nutzt feste lokale Testdaten, keine echte ElevenLabs-Session |
-| Gleiche Fragen in Live-Sessions | Agent-Prompt/Temperature/`session_seed` prüfen; Stand 2026-06-19 nutzt `temperature=0.7` und `session_seed` |
+| Gleiche Fragen in Live-Sessions | Backend-Fallauswahl und Agent-Prompt prüfen: `oral-exam-session` muss wechselnde `scenario_*` Dynamic Variables liefern; Agent muss diese Variablen verwenden |
 | Status zeigt falschen Sprecher | `getOutputVolume()`/`getInputVolume()` prüfen; Transkript-Events dürfen nicht allein als Audio-Status dienen |
 | „Kein Transkript verfügbar" | Gespräch zu kurz / leer; ElevenLabs-Conversation noch nicht fertig (Retry greift) |
 | Auswertung schlägt fehl | `OPENAI_API_KEY` fehlt/ungültig; OpenAI-Antwort nicht schema-valide; Session wird bei vorhandenem Transkript `evaluation_failed` |
@@ -370,15 +419,15 @@ Status: live gesetzt und funktionsfähig (belegt durch erfolgreiche Session-Zeil
 
 ---
 
-## 13. Checkliste öffentlicher Launch (noch offen)
+## 13. Checkliste öffentlicher Launch
 
-1. **`user_profiles` erweitern** um `is_premium`, `first_name`, `full_name` — sonst greifen der
-   Premium-Check (Pfad 2) und `candidate_name` für Nicht-Admins nicht (aktuell fehlen diese Spalten).
-2. **Admin-Gate entfernen** an allen drei Stellen (Karte, `AdminGuard`-Routen, `ADMIN_EMAILS` in
-   `oral-exam-session`).
-3. **`oral-exam-session` neu deployen** (nach Gate-Entfernung) + **Frontend-Prod-Deploy**.
-4. Optional Phase 5: 15-Min-Modus, mehrere Prüfer-Personas, kuratierter Szenario-Pool
-   (juristische Endkontrolle), echte Post-Call-Webhooks.
+1. Migration `20260619170928_add_subscription_period_start.sql` anwenden.
+2. Functions deployen: `oral-exam-entitlement`, `oral-exam-session`, `oral-exam-evaluation`,
+   plus geänderte Stripe-/Sync-Functions (`stripe-webhook`, `sync-subscription`, `verify-checkout`).
+3. Frontend-Prod-Deploy.
+4. Smoke-Test mit Gast, Free-Nutzer, Premium-Nutzer und ausgeschöpftem Premium-Kontingent.
+5. Optional Phase 5: UI-Optimierungen, Flashcards/RAG für ElevenLabs, 15-Min-Modus, mehrere Prüfer,
+   kuratierter Szenario-Pool, echte Post-Call-Webhooks.
 
 ---
 
