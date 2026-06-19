@@ -6,7 +6,7 @@ import { usePostHog } from '../contexts/PostHogProvider';
 import { supabase } from '../lib/supabase';
 import { getEmailDomain, getTikTokAnalyticsContext, trackTikTokServerEvent } from '../utils/tiktokAnalytics';
 import { trackServerEvent } from '../services/serverAnalytics';
-import { X, Crown, Check, MessageCircle, Lightbulb, Infinity, ShieldCheck, Rocket, Languages, ChevronDown, Users, BookOpen, Timer, Blocks, Calendar, Sparkles, Pencil, GraduationCap, Layers, Target, Trophy, Mail, LogIn, Eye, EyeOff, UserRound } from 'lucide-react';
+import { X, Crown, Check, MessageCircle, Infinity, ShieldCheck, Rocket, Languages, ChevronDown, BookOpen, Pencil, GraduationCap, Target, Trophy, Mail, LogIn, Eye, EyeOff, UserRound } from 'lucide-react';
 import { EmbeddedPayment } from './EmbeddedPayment';
 import { TransitionAccessNotice } from './TransitionAccessNotice';
 
@@ -459,7 +459,7 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                     icon: <GraduationCap size={20} />,
                     titleDE: 'Prüfungssimulation',
                     titleAR: 'محاكاة الامتحان',
-                    descDE: 'Trainiere Zeit & Format wie in der Prüfung',
+                    descDE: 'Schriftlich und mündlich wie in der echten Prüfung',
                     descAR: 'تدرب على الوقت والتنسيق كما في الامتحان',
                     badge: 'IHK-NAH',
                     badgeType: 'quality'
@@ -473,15 +473,6 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                     badge: '9 MODULE',
                     badgeType: 'quantity'
                 },
-                {
-                    icon: <Layers size={20} />,
-                    titleDE: 'Mündliche Prüfung',
-                    titleAR: 'الامتحان الشفهي',
-                    descDE: 'Typische Fragen + sichere Antworten',
-                    descAR: 'أسئلة شائعة + إجابات آمنة',
-                    badge: 'LERNKARTEN',
-                    badgeType: 'quality'
-                }
             ]
         }
     ];
@@ -600,6 +591,30 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                     <div className={`grid transition-all duration-500 ease-out ${valueStackOpen ? 'grid-rows-[1fr] opacity-100 mt-5 pt-5 border-t border-slate-100 dark:border-slate-800' : 'grid-rows-[0fr] opacity-0'}`}>
                                         <div className="overflow-hidden">
                                             <div className="space-y-6 pb-1">
+                                                {!isTikTokPaywall && (
+                                                    <div className="relative overflow-hidden rounded-2xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/20 p-4">
+                                                        <div className="absolute right-3 top-3 rounded-full bg-white dark:bg-blue-950/70 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-300">
+                                                            Neu
+                                                        </div>
+                                                        <div className="flex items-start gap-3 pr-12">
+                                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-500/20">
+                                                                <MessageCircle size={20} strokeWidth={2.6} />
+                                                            </div>
+                                                            <div className="min-w-0">
+                                                                <h4 className="text-[15px] font-black leading-tight text-slate-900 dark:text-white">
+                                                                    KI-Mündliche Prüfung
+                                                                </h4>
+                                                                <p className="mt-1 text-[12px] font-semibold leading-snug text-slate-600 dark:text-slate-300">
+                                                                    Übe echte Prüfungssituationen und gehe sicherer in die mündliche Prüfung.
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                                                            <Check size={14} strokeWidth={3} />
+                                                            Auswertung + Audio inklusive
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 {benefitGroups.map((group, gIdx) => (
                                                     <div key={gIdx} className="space-y-3">
                                                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{group.nameDE}</p>
@@ -666,6 +681,10 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                                 <div className="flex items-start gap-3">
                                                     <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-950/60 flex items-center justify-center text-blue-600 dark:text-blue-300 shrink-0"><Infinity size={14} /></div>
                                                     <div><p className="text-[13px] font-bold dark:text-slate-100">Einmalzahlung statt Abo</p><p className="text-[11px] text-slate-500 dark:text-slate-400">6 Monate voller Zugriff ohne Abo-Falle</p></div>
+                                                </div>
+                                                <div className="flex items-start gap-3">
+                                                    <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-950/60 flex items-center justify-center text-blue-600 dark:text-blue-300 shrink-0"><MessageCircle size={14} /></div>
+                                                    <div><p className="text-[13px] font-bold dark:text-slate-100">KI-Mündlich inklusive</p><p className="text-[11px] text-slate-500 dark:text-slate-400">10 Vollsimulationen im 6-Monats-Zugang</p></div>
                                                 </div>
                                             </div>
                                         </div>

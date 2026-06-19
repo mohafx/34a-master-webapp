@@ -456,12 +456,17 @@ function FreestyleDashboardContent({
                 <span className="material-icons text-[#EA580C] dark:text-orange-400">school</span>
               </div>
               <div className="flex-1">
-                <h3 className="font-bold text-base leading-tight mb-1">
-                  Prüfungssimulation
-                  {language === 'DE_AR' && <span className="block text-sm font-normal mt-0.5 text-[#4B5563] dark:text-[#9CA3AF]" dir="rtl" style={{ textAlign: 'left' }}>محاكاة الامتحان</span>}
-                </h3>
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <h3 className="font-bold text-base leading-tight">
+                    Prüfungssimulation
+                    {language === 'DE_AR' && <span className="block text-sm font-normal mt-0.5 text-[#4B5563] dark:text-[#9CA3AF]" dir="rtl" style={{ textAlign: 'left' }}>محاكاة الامتحان</span>}
+                  </h3>
+                  <span className="rounded-full bg-orange-100 dark:bg-orange-900/40 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-[#EA580C] dark:text-orange-300">
+                    Neu
+                  </span>
+                </div>
                 <p className="text-sm text-[#4B5563] dark:text-[#9CA3AF]">
-                  Echte Prüfungssituation simulieren
+                  Schriftlich und <span className="font-bold text-[#EA580C] dark:text-orange-300">mündlich</span> wie in der echten Prüfung
                   {language === 'DE_AR' && <span className="block text-xs mt-0.5 opacity-80" dir="rtl" style={{ textAlign: 'left' }}>محاكاة ظروف الامتحان الحقيقية</span>}
                 </p>
               </div>
