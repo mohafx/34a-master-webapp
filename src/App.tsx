@@ -88,7 +88,7 @@ const AdminGuard = lazy(() => import('./components/pages/admin/AdminGuard'));
 const AdminWrittenExamBrowser = lazy(() => import('./components/pages/admin/AdminWrittenExamBrowser'));
 const AdminWrittenExamQuestionList = lazy(() => import('./components/pages/admin/AdminWrittenExamQuestionList'));
 const AdminWrittenExamQuiz = lazy(() => import('./components/pages/admin/AdminWrittenExamQuiz'));
-// Mündliche Prüfungssimulation (KI) — Soft-Launch: alle Routen hinter AdminGuard
+// Mündliche Prüfungssimulation (KI)
 const OralExamIntro = lazy(() => import('./components/pages/OralExamIntro'));
 const OralExamLive = lazy(() => import('./components/pages/OralExamLive'));
 const OralExamResults = lazy(() => import('./components/pages/OralExamResults'));
@@ -935,6 +935,7 @@ function AppContent() {
                     <Route path="/written-exam" element={<WrittenExam />} />
                     <Route path="/written-exam/results/:sessionId" element={<WrittenExamResults />} />
                     <Route path="/exam/history" element={<WrittenExamHistory />} />
+                    {/* Mündliche Prüfung: vorerst nur für Admin (Public-Launch später). */}
                     <Route path="/oral-exam" element={<AdminGuard><OralExamIntro /></AdminGuard>} />
                     <Route path="/oral-exam/live" element={<AdminGuard><OralExamLive /></AdminGuard>} />
                     <Route path="/oral-exam/results/:sessionId" element={<AdminGuard><OralExamResults /></AdminGuard>} />

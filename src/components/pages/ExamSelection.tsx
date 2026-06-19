@@ -1,17 +1,92 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GraduationCap, ArrowLeft, Languages, Zap, FileText, Mic, X, ChevronRight } from 'lucide-react';
+import { GraduationCap, ArrowLeft, Languages, Zap, FileText, Mic, X, ChevronRight, Crown } from 'lucide-react';
 import { useApp } from '../../App';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSubscription } from '../../contexts/SubscriptionContext';
+import { getOralExamEntitlement, listOralExamSessions } from '../../services/oralExam';
 import { isAdminEmail } from '../../utils/userRoles';
+import type { OralExamEntitlement } from '../../types';
 
 export default function ExamSelection() {
     const navigate = useNavigate();
-    const { language, toggleLanguage, showLanguageToggle } = useApp();
+    const { language, toggleLanguage, showLanguageToggle, isPremium, openAuthDialog } = useApp();
     const { user } = useAuth();
-    const showOralExam = isAdminEmail(user?.email);
+    const { subscription, transitionGrant } = useSubscription();
+    const isAdmin = isAdminEmail(user?.email);
 
     const [showWrittenModal, setShowWrittenModal] = useState(false);
+    const [oralEntitlement, setOralEntitlement] = useState<OralExamEntitlement | null>(null);
+
+    useEffect(() => {
+        let mounted = true;
+
+        async function loadOralEntitlement() {
+            if (!user) {
+                setOralEntitlement(null);
+                return;
+            }
+
+            try {
+                const entitlement = await getOralExamEntitlement();
+                if (mounted) setOralEntitlement(entitlement);
+            } catch (_) {
+                const sessions = await listOralExamSessions(50);
+                const mode = isPremium ? 'full_simulation' : 'free_test_3q';
+                const windowStartsAt = isPremium
+                    ? subscription?.current_period_start ?? transitionGrant?.starts_at ?? null
+                    : null;
+                const windowEndsAt = isPremium
+                    ? subscription?.current_period_end ?? transitionGrant?.ends_at ?? null
+                    : null;
+                const used = sessions.filter((session) => {
+                    if (session.mode !== mode) return false;
+                    if (windowStartsAt && new Date(session.created_at) < new Date(windowStartsAt)) return false;
+                    if (windowEndsAt && new Date(session.created_at) > new Date(windowEndsAt)) return false;
+                    return true;
+                }).length;
+                const limit = isPremium ? 10 : 1;
+                if (mounted) {
+                    setOralEntitlement({
+                        isPremium,
+                        mode,
+                        used,
+                        limit,
+                        remaining: Math.max(limit - used, 0),
+                        windowStartsAt,
+                        windowEndsAt,
+                    });
+                }
+            }
+        }
+
+        void loadOralEntitlement();
+
+        return () => {
+            mounted = false;
+        };
+    }, [user?.id, isPremium, subscription?.current_period_start, subscription?.current_period_end, transitionGrant?.starts_at, transitionGrant?.ends_at]);
+
+    const handleOralExamClick = () => {
+        if (!user) {
+            openAuthDialog('register', {
+                de: 'Registriere dich kostenlos und starte deine 1 Mini-Simulation der mündlichen Prüfung.',
+                ar: 'سجّل مجاناً وابدأ محاكاة مصغّرة واحدة للامتحان الشفوي.'
+            });
+            return;
+        }
+        navigate('/oral-exam');
+    };
+
+    const oralBadgeText = !user
+        ? '1x kostenlos testen'
+        : oralEntitlement
+            ? oralEntitlement.isPremium
+                ? `${oralEntitlement.remaining} / ${oralEntitlement.limit} Tickets`
+                : `${oralEntitlement.remaining} / ${oralEntitlement.limit} Mini frei`
+            : isPremium
+                ? 'Tickets werden geladen'
+                : '1x kostenlos testen';
 
     return (
         <div className="max-w-4xl mx-auto px-4 pb-32">
@@ -83,37 +158,41 @@ export default function ExamSelection() {
                     </div>
                 </button>
 
-                {/* Mündliche Prüfung (KI) — Soft-Launch: nur für Admin sichtbar */}
-                {showOralExam && (
-                    <button
-                        onClick={() => navigate('/oral-exam')}
-                        className="w-full text-left bg-white dark:bg-slate-800 rounded-[24px] p-1 shadow-md border-2 border-violet-100 dark:border-violet-900/30 hover:border-violet-500 dark:hover:border-violet-500 transition-all active:scale-[0.98] group relative overflow-hidden"
-                    >
-                        <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <div className="p-5 relative z-10">
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="w-12 h-12 bg-gradient-to-br from-violet-600 to-indigo-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/20">
-                                    <Mic size={24} strokeWidth={2.5} />
-                                </div>
-                                <span className="text-[10px] font-black uppercase tracking-wide bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300 px-2.5 py-1 rounded-full">
-                                    Beta · Intern
-                                </span>
+                {/* Mündliche Prüfung (KI) — vorerst nur für Admin sichtbar/testbar */}
+                {isAdmin && (
+                <button
+                    onClick={handleOralExamClick}
+                    className="w-full text-left bg-white dark:bg-slate-800 rounded-[24px] p-1 shadow-md border-2 border-violet-100 dark:border-violet-900/30 hover:border-violet-500 dark:hover:border-violet-500 transition-all active:scale-[0.98] group relative overflow-hidden"
+                >
+                    <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="p-5 relative z-10">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="w-12 h-12 bg-gradient-to-br from-violet-600 to-indigo-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/20">
+                                <Mic size={24} strokeWidth={2.5} />
                             </div>
-                            <h3 className="font-black text-lg text-slate-900 dark:text-white mb-1">Mündliche Prüfung</h3>
-                            {language === 'DE_AR' && <p className="text-sm text-violet-600 dark:text-violet-500 font-bold mb-1 text-right" dir="rtl">الامتحان الشفوي</p>}
-                            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-                                KI-Prüfersimulation mit Sprache: Fallbeispiele, Rückfragen und Auswertung.
-                            </p>
-                            <div className="flex items-center gap-4 text-xs font-bold text-slate-500 dark:text-slate-400">
-                                <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
-                                    Sprachgesteuert
-                                </span>
-                                <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
-                                    8-12 Min
-                                </span>
-                            </div>
+                            <span className={`text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full ${isPremium
+                                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                                : 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300'
+                                }`}>
+                                {oralBadgeText}
+                            </span>
                         </div>
-                    </button>
+                        <h3 className="font-black text-lg text-slate-900 dark:text-white mb-1">Mündliche Prüfung</h3>
+                        {language === 'DE_AR' && <p className="text-sm text-violet-600 dark:text-violet-500 font-bold mb-1 text-right" dir="rtl">الامتحان الشفوي</p>}
+                        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+                            KI-Prüfersimulation mit Sprache: Fallbeispiele, Rückfragen und Auswertung.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
+                            <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
+                                Sprachgesteuert
+                            </span>
+                            <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
+                                {isPremium ? <Crown size={12} /> : <Zap size={12} />}
+                                {isPremium ? 'Premium · Voll' : 'Free · Mini'}
+                            </span>
+                        </div>
+                    </div>
+                </button>
                 )}
 
                 {/* Abgeschlossene Prüfungen */}

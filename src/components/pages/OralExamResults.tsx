@@ -3,10 +3,11 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
     ArrowLeft, Loader2, CheckCircle2, XCircle, Target, ThumbsUp,
     AlertCircle, BookOpen, Compass, ArrowRight, Mic, MessageSquare, Headphones,
-    MinusCircle, RefreshCw,
+    MinusCircle, RefreshCw, MessageCircle,
 } from 'lucide-react';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import { getOralExamSession, getOralExamAudioUrl, retryOralExamEvaluation } from '../../services/oralExam';
+import { openWhatsAppSupport } from '../../utils/whatsappSupport';
 import type { OralExamEvaluation, OralExamAnswerEvaluation, OralExamAnswerVerdict, OralExamSession } from '../../types';
 
 interface ResultsNavState {
@@ -58,6 +59,16 @@ export default function OralExamResults() {
     const [error, setError] = useState<string | null>(null);
     const [session, setSession] = useState<OralExamSession | null>(null);
     const trackedRef = useRef(false);
+    const audioPathRef = useRef<string | null>(null);
+    const audioRetriedRef = useRef(false);
+
+    // Signierte Audio-URL läuft nach 1 h ab. Bei Wiedergabefehler einmal neu erzeugen.
+    const handleAudioError = async () => {
+        if (audioRetriedRef.current || !audioPathRef.current) return;
+        audioRetriedRef.current = true;
+        const fresh = await getOralExamAudioUrl(audioPathRef.current);
+        if (fresh) setAudioUrl(fresh);
+    };
 
     const lastSessionIdRef = useRef<string | undefined>(undefined);
 
@@ -117,6 +128,8 @@ export default function OralExamResults() {
             }
 
             if (audioPath) {
+                audioPathRef.current = audioPath;
+                audioRetriedRef.current = false;
                 const url = await getOralExamAudioUrl(audioPath);
                 if (!cancelled) setAudioUrl(url);
             }
@@ -142,6 +155,8 @@ export default function OralExamResults() {
             setEvaluation(result);
             setError(null);
             if (result.audio_path) {
+                audioPathRef.current = result.audio_path;
+                audioRetriedRef.current = false;
                 const url = await getOralExamAudioUrl(result.audio_path);
                 setAudioUrl(url);
             }
@@ -161,6 +176,19 @@ export default function OralExamResults() {
         } finally {
             setRetrying(false);
         }
+    };
+
+    const handleWhatsAppSupport = (message?: string | null) => {
+        openWhatsAppSupport({
+            topic: 'mündlichen Prüfung',
+            message,
+            context: {
+                Session: sessionId,
+                Modus: session?.mode ?? navState.mode ?? null,
+                Score: evaluation?.overall_score_pct != null ? `${evaluation.overall_score_pct}%` : null,
+                Status: session?.status ?? null,
+            },
+        });
     };
 
     useEffect(() => {
@@ -209,6 +237,14 @@ export default function OralExamResults() {
                         Verlauf
                     </button>
                 </div>
+                <button
+                    type="button"
+                    onClick={() => handleWhatsAppSupport(error ?? 'Keine Auswertung verfügbar.')}
+                    className="mx-auto mt-4 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-black text-violet-700 transition-all hover:bg-violet-50 active:scale-95 dark:text-violet-300 dark:hover:bg-violet-900/20"
+                >
+                    <MessageCircle size={17} strokeWidth={2.5} />
+                    Fehler per WhatsApp melden
+                </button>
             </div>
         );
     }
@@ -267,7 +303,7 @@ export default function OralExamResults() {
             {/* Audio-Wiedergabe */}
             {audioUrl && (
                 <Section icon={<Headphones size={18} />} title="Gespräch anhören">
-                    <audio controls src={audioUrl} className="w-full" preload="none">
+                    <audio controls src={audioUrl} className="w-full" preload="none" onError={() => void handleAudioError()}>
                         Dein Browser unterstützt keine Audio-Wiedergabe.
                     </audio>
                     <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">Vollständige Aufnahme deiner Prüfung (Prüfer + du).</p>
@@ -368,6 +404,14 @@ export default function OralExamResults() {
                     Verlauf ansehen
                 </button>
             </div>
+            <button
+                type="button"
+                onClick={() => handleWhatsAppSupport('Feedback zur Simulation')}
+                className="mx-auto mt-4 flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-black text-slate-500 transition-all hover:bg-white hover:text-violet-700 active:scale-95 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-violet-300"
+            >
+                <MessageCircle size={17} strokeWidth={2.5} />
+                Feedback zur Simulation senden
+            </button>
         </div>
     );
 }

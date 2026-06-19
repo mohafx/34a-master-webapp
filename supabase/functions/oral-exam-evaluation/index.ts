@@ -250,7 +250,7 @@ serve(async (req) => {
         // Idempotenz: bereits ausgewertet? → vorhandenes Ergebnis zurückgeben (kein Doppel-OpenAI).
         const { data: existing } = await supabaseAdmin
             .from("oral_exam_sessions")
-            .select("status, overall_score_pct, passed, topic_scores, feedback, audio_path, transcript, duration_s")
+            .select("status, overall_score_pct, passed, topic_scores, feedback, audio_path, transcript, duration_s, connected_at")
             .eq("id", sessionId)
             .eq("user_id", user.id)
             .maybeSingle();
@@ -333,6 +333,7 @@ serve(async (req) => {
                     status: "evaluation_failed",
                     ended_at: new Date().toISOString(),
                     duration_s: requestDurationS ?? existing?.duration_s ?? null,
+                    connected_at: existing?.connected_at ?? new Date().toISOString(),
                     transcript,
                     feedback: {
                         error: "Auswertung konnte nicht erzeugt werden.",
@@ -365,7 +366,8 @@ serve(async (req) => {
             .update({
                 status: "done",
                 ended_at: new Date().toISOString(),
-                duration_s: typeof durationS === "number" ? Math.round(durationS) : null,
+                duration_s: requestDurationS ?? existing?.duration_s ?? null,
+                connected_at: existing?.connected_at ?? new Date().toISOString(),
                 transcript,
                 overall_score_pct: overall,
                 passed,
@@ -394,6 +396,7 @@ serve(async (req) => {
                     status: "evaluation_failed",
                     ended_at: new Date().toISOString(),
                     duration_s: requestDurationS,
+                    connected_at: new Date().toISOString(),
                     transcript: resolvedTranscript,
                     feedback: {
                         error: error?.message || "unknown",

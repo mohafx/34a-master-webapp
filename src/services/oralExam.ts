@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import type {
+    OralExamEntitlement,
     OralExamEvaluation,
     OralExamSession,
     OralExamStartResponse,
@@ -16,7 +17,7 @@ const ORAL_EXAM_TABLE = 'oral_exam_sessions';
 
 // supabase.functions.invoke liefert bei non-2xx einen FunctionsHttpError, dessen
 // Body in error.context (Response) steckt. Diese Helfer holt das JSON heraus,
-// damit wir Fehlercodes wie "feature_not_available" auswerten können.
+// damit wir Fehlercodes wie "paywallRequired" / "ticketLimitReached" auswerten können.
 async function readFunctionErrorBody(error: any): Promise<any | null> {
     try {
         const ctx = error?.context;
@@ -29,31 +30,35 @@ async function readFunctionErrorBody(error: any): Promise<any | null> {
     return null;
 }
 
-export class OralExamFeatureUnavailableError extends Error {
-    constructor() {
-        super('feature_not_available');
-        this.name = 'OralExamFeatureUnavailableError';
+export class OralExamPaywallError extends Error {
+    entitlement?: OralExamEntitlement;
+
+    constructor(entitlement?: OralExamEntitlement) {
+        super('paywallRequired');
+        this.name = 'OralExamPaywallError';
+        this.entitlement = entitlement;
     }
 }
 
-export class OralExamPaywallError extends Error {
-    constructor() {
-        super('paywallRequired');
-        this.name = 'OralExamPaywallError';
+export class OralExamTicketLimitError extends Error {
+    entitlement?: OralExamEntitlement;
+
+    constructor(entitlement?: OralExamEntitlement) {
+        super('ticketLimitReached');
+        this.name = 'OralExamTicketLimitError';
+        this.entitlement = entitlement;
     }
 }
 
 /**
  * Startet eine mündliche Prüfungssimulation. Legt serverseitig eine Session an
  * und liefert die ElevenLabs Signed URL + Dynamic Variables zurück.
- * @param requestedMode optionaler Modus-Override — nur für Admins wirksam (Test beider Abläufe),
- *   sonst ergibt sich der Modus serverseitig aus dem Premium-Status.
- * @throws OralExamFeatureUnavailableError wenn kein Admin (Soft-Launch-Gate)
  * @throws OralExamPaywallError wenn Free-Kontingent (1 Gratis-Test) aufgebraucht
+ * @throws OralExamTicketLimitError wenn Premium-Kontingent (10 Prüfungstickets) aufgebraucht
  */
 export async function startOralExamSession(
     focusTopic?: string | null,
-    requestedMode?: 'free_test_3q' | 'full_simulation' | null
+    requestedMode?: 'free_test_3q' | 'full_simulation' | null,
 ): Promise<OralExamStartResponse> {
     const { data, error } = await supabase.functions.invoke('oral-exam-session', {
         body: {
@@ -64,9 +69,6 @@ export async function startOralExamSession(
 
     if (error) {
         const body = await readFunctionErrorBody(error);
-        if (body?.error === 'feature_not_available') {
-            throw new OralExamFeatureUnavailableError();
-        }
         if (body?.error === 'unauthorized') {
             throw new Error('Bitte melde dich an, um die mündliche Prüfung zu starten.');
         }
@@ -75,7 +77,10 @@ export async function startOralExamSession(
 
     // paywallRequired wird mit Status 200 zurückgegeben → landet in data.
     if (data?.paywallRequired) {
-        throw new OralExamPaywallError();
+        throw new OralExamPaywallError(data.entitlement);
+    }
+    if (data?.ticketLimitReached) {
+        throw new OralExamTicketLimitError(data.entitlement);
     }
 
     if (!data?.sessionId || !data?.signedUrl) {
@@ -83,6 +88,25 @@ export async function startOralExamSession(
     }
 
     return data as OralExamStartResponse;
+}
+
+/** Lädt Prüfungstickets/Startberechtigung, ohne eine ElevenLabs-Session anzulegen. */
+export async function getOralExamEntitlement(): Promise<OralExamEntitlement> {
+    const { data, error } = await supabase.functions.invoke('oral-exam-entitlement');
+
+    if (error) {
+        const body = await readFunctionErrorBody(error);
+        if (body?.error === 'unauthorized') {
+            throw new Error('Bitte melde dich an, um die mündliche Prüfung zu starten.');
+        }
+        throw new Error(body?.error || error.message || 'Prüfungstickets konnten nicht geladen werden.');
+    }
+
+    if (!data?.entitlement) {
+        throw new Error('Unerwartete Antwort vom Server (keine Prüfungstickets).');
+    }
+
+    return data.entitlement as OralExamEntitlement;
 }
 
 /**
@@ -177,13 +201,33 @@ export async function listOralExamSessions(limit = 20): Promise<OralExamSession[
     return (data as OralExamSession[]) ?? [];
 }
 
-/** Markiert eine laufende Session als abgebrochen (z. B. bei Verlassen ohne Auswertung). */
+/**
+ * Bestätigt, dass die Session real verbunden hat (ElevenLabs onConnect).
+ * Setzt connected_at → ab hier zählt das Ticket. Nur pending → running.
+ */
+export async function confirmOralExamSession(sessionId: string): Promise<void> {
+    const { error } = await supabase
+        .from(ORAL_EXAM_TABLE)
+        .update({ status: 'running', connected_at: new Date().toISOString() })
+        .eq('id', sessionId)
+        .eq('status', 'pending');
+
+    if (error) {
+        console.error('confirmOralExamSession error:', error.message);
+    }
+}
+
+/**
+ * Markiert eine noch nicht ausgewertete Session als abgebrochen (Verlassen ohne Auswertung).
+ * Gilt für pending (nie verbunden) UND running (verbunden, aber abgebrochen). Die Ticketzählung
+ * bleibt korrekt, weil sie an connected_at hängt, nicht am Status.
+ */
 export async function abortOralExamSession(sessionId: string): Promise<void> {
     const { error } = await supabase
         .from(ORAL_EXAM_TABLE)
         .update({ status: 'aborted', ended_at: new Date().toISOString() })
         .eq('id', sessionId)
-        .eq('status', 'running');
+        .in('status', ['pending', 'running']);
 
     if (error) {
         console.error('abortOralExamSession error:', error.message);

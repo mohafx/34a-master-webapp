@@ -178,7 +178,7 @@ export type WrittenExamTopic = keyof typeof TOPIC_DISTRIBUTION;
 // docs/produkt/ki-muendliche-pruefungssimulation-umsetzung.md
 
 export type OralExamMode = 'free_test_3q' | 'full_simulation' | 'full_5min';
-export type OralExamStatus = 'running' | 'done' | 'aborted' | 'evaluation_failed';
+export type OralExamStatus = 'pending' | 'running' | 'done' | 'aborted' | 'evaluation_failed';
 
 export interface OralExamTranscriptTurn {
   role: 'examiner' | 'candidate';
@@ -221,6 +221,7 @@ export interface OralExamEvaluation extends OralExamFeedback {
   overall_score_pct: number;
   passed: boolean;
   topic_scores: OralExamTopicScore[];
+  audio_path?: string | null;
 }
 
 // Eine Zeile aus oral_exam_sessions (snake_case wie in der DB).
@@ -242,15 +243,31 @@ export interface OralExamSession {
   created_at: string;
 }
 
+export interface OralExamEntitlement {
+  isPremium: boolean;
+  mode: 'free_test_3q' | 'full_simulation';
+  used: number;
+  limit: number;
+  remaining: number;
+  windowStartsAt: string | null;
+  windowEndsAt: string | null;
+}
+
 // Erfolgreiche Antwort von oral-exam-session.
 export interface OralExamStartResponse {
   sessionId: string;
   mode: OralExamMode;
   maxDurationSec: number;
   signedUrl: string;
+  entitlement?: OralExamEntitlement;
   dynamicVariables: {
     mode: string;
     focus_topic: string;
+    scenario_id?: string;
+    scenario_title?: string;
+    scenario_topic?: string;
+    scenario_brief?: string;
+    scenario_expected?: string;
     candidate_name: string;
     session_seed: string;
   };

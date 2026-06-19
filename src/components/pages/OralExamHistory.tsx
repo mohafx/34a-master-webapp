@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, CheckCircle2, XCircle, Mic, ChevronRight, AlertCircle } from 'lucide-react';
+import { useApp } from '../../App';
 import { listOralExamSessions } from '../../services/oralExam';
 import type { OralExamSession } from '../../types';
 
@@ -22,15 +23,21 @@ const MODE_LABEL: Record<string, string> = {
 
 export default function OralExamHistory() {
     const navigate = useNavigate();
+    const { user, openAuthDialog } = useApp();
     const [sessions, setSessions] = useState<OralExamSession[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (!user) {
+            setSessions([]);
+            setLoading(false);
+            return;
+        }
         (async () => {
             setSessions(await listOralExamSessions());
             setLoading(false);
         })();
-    }, []);
+    }, [user]);
 
     return (
         <div className="max-w-3xl mx-auto px-4 pb-32">
@@ -54,6 +61,19 @@ export default function OralExamHistory() {
                 <div className="py-20 text-center">
                     <Loader2 size={36} className="animate-spin text-violet-600 mx-auto" />
                 </div>
+            ) : !user ? (
+                <div className="py-16 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-5">
+                        <Mic size={30} />
+                    </div>
+                    <p className="text-slate-600 dark:text-slate-300 mb-6">Melde dich an, um deine mündlichen Prüfungen zu sehen.</p>
+                    <button
+                        onClick={() => openAuthDialog('login')}
+                        className="px-6 py-3 rounded-2xl bg-violet-600 text-white font-bold active:scale-95 transition-all"
+                    >
+                        Anmelden
+                    </button>
+                </div>
             ) : sessions.length === 0 ? (
                 <div className="py-16 text-center">
                     <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-5">
@@ -69,11 +89,22 @@ export default function OralExamHistory() {
                 </div>
             ) : (
                 <div className="space-y-3">
-                    {sessions.map((s) => {
+                    {sessions.filter((s) => s.status !== 'pending').map((s) => {
                         const done = s.status === 'done' && s.overall_score_pct != null;
                         const aborted = s.status === 'aborted';
+                        const incomplete = s.status === 'running';
                         const failed = !done;
                         const passed = s.passed ?? (s.overall_score_pct ?? 0) >= 50;
+                        const statusLabel = done
+                            ? `${s.overall_score_pct}%`
+                            : aborted
+                                ? 'Abgebrochen'
+                                : incomplete
+                                    ? 'Unvollständig'
+                                    : 'Auswertung fehlgeschlagen';
+                        const topicLabel = s.focus_topic && !s.focus_topic.startsWith('scenario:')
+                            ? ` · ${s.focus_topic}`
+                            : '';
                         return (
                             <button
                                 key={s.id}
@@ -91,12 +122,12 @@ export default function OralExamHistory() {
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                         <span className="font-black text-slate-900 dark:text-white">
-                                            {done ? `${s.overall_score_pct}%` : aborted ? 'Abgebrochen' : 'Auswertung fehlgeschlagen'}
+                                            {statusLabel}
                                         </span>
                                         <span className="text-xs font-bold text-slate-400">{MODE_LABEL[s.mode] ?? s.mode}</span>
                                     </div>
                                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                                        {formatDate(s.created_at)}{s.focus_topic ? ` · ${s.focus_topic}` : ''}{failed ? aborted ? ' · Neue Prüfung' : ' · Retry' : ''}
+                                        {formatDate(s.created_at)}{topicLabel}{failed ? (aborted || incomplete) ? ' · Neue Prüfung' : ' · Retry' : ''}
                                     </p>
                                 </div>
                                 <ChevronRight size={20} className="text-slate-300 dark:text-slate-600 flex-shrink-0" />

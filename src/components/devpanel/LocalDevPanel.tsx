@@ -1,5 +1,12 @@
-import { Bug, CheckCircle2, Crown, LogIn, LogOut, Rocket, Sparkles, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Bug, CheckCircle2, Crown, Loader2, LogIn, LogOut, RefreshCw, Rocket, Sparkles, Ticket, X } from 'lucide-react';
 import { useDevPanel, type DevAccountState, type DevShortcutId } from '../../devpanel/DevPanelContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useSubscription } from '../../contexts/SubscriptionContext';
+import { isAdminEmail } from '../../utils/userRoles';
+import { getOralExamEntitlement } from '../../services/oralExam';
+import { adminResetOralExamTickets, adminSetPremium } from '../../services/oralExamAdmin';
+import type { OralExamEntitlement } from '../../types';
 
 const stateButtons: Array<{
   id: DevAccountState;
@@ -37,7 +44,11 @@ export function LocalDevPanel() {
     setShowExplanationImages,
   } = useDevPanel();
 
-  if (!enabled) return null;
+  const { user } = useAuth();
+  const isAdmin = isAdminEmail(user?.email);
+  const visible = enabled || isAdmin;
+
+  if (!visible) return null;
 
   const simulateSuccessfulPayment = () => {
     setOverrideState('premium');
@@ -75,6 +86,10 @@ export function LocalDevPanel() {
             </button>
           </div>
 
+          {isAdmin && <AdminSection />}
+
+          {enabled && (
+          <>
           <div className="mb-4">
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
               Zustände
@@ -165,8 +180,130 @@ export function LocalDevPanel() {
               ))}
             </div>
           </div>
+          </>
+          )}
         </div>
       )}
     </>
+  );
+}
+
+function AdminSection() {
+  const { refreshSubscription } = useSubscription();
+  const [entitlement, setEntitlement] = useState<OralExamEntitlement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<null | 'premium' | 'reset'>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadEntitlement = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setEntitlement(await getOralExamEntitlement());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Status konnte nicht geladen werden.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadEntitlement();
+  }, [loadEntitlement]);
+
+  const handleTogglePremium = async () => {
+    if (busy) return;
+    setBusy('premium');
+    setMessage(null);
+    setError(null);
+    try {
+      const next = !entitlement?.isPremium;
+      await adminSetPremium(next);
+      await refreshSubscription();
+      await loadEntitlement();
+      setMessage(next ? 'Konto ist jetzt Premium.' : 'Konto ist jetzt Free.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Premium-Wechsel fehlgeschlagen.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleReset = async () => {
+    if (busy) return;
+    setBusy('reset');
+    setMessage(null);
+    setError(null);
+    try {
+      const deleted = await adminResetOralExamTickets();
+      await loadEntitlement();
+      setMessage(`Tickets zurückgesetzt (${deleted} Sessions gelöscht).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Zurücksetzen fehlgeschlagen.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const isPremium = Boolean(entitlement?.isPremium);
+
+  return (
+    <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-900/20">
+      <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
+        Admin (echtes Konto)
+      </p>
+
+      <div className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
+        {loading ? (
+          <span className="inline-flex items-center gap-2 text-slate-500 dark:text-slate-400">
+            <Loader2 size={14} className="animate-spin" /> Status wird geladen…
+          </span>
+        ) : entitlement ? (
+          <span>
+            {isPremium ? 'Premium' : 'Free'} · {entitlement.remaining}/{entitlement.limit} Tickets ·{' '}
+            {entitlement.mode === 'full_simulation' ? 'Vollsimulation' : 'Mini-Test'}
+          </span>
+        ) : (
+          <span className="text-slate-500 dark:text-slate-400">Status unbekannt</span>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={handleTogglePremium}
+        disabled={busy !== null || loading}
+        className={`mb-2 inline-flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition disabled:opacity-50 ${
+          isPremium
+            ? 'border-amber-400 bg-amber-100 text-amber-900 dark:border-amber-600 dark:bg-amber-800/30 dark:text-amber-100'
+            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800'
+        }`}
+      >
+        <span>{isPremium ? 'Premium aktiv → auf Free wechseln' : 'Auf Premium wechseln'}</span>
+        {busy === 'premium' ? <Loader2 size={16} className="animate-spin" /> : <Crown size={16} />}
+      </button>
+
+      <button
+        type="button"
+        onClick={handleReset}
+        disabled={busy !== null || loading}
+        className="inline-flex w-full items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-100 dark:hover:bg-emerald-900/30"
+      >
+        <span>Tickets aufladen / zurücksetzen</span>
+        {busy === 'reset' ? <Loader2 size={16} className="animate-spin" /> : <Ticket size={16} />}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => void loadEntitlement()}
+        disabled={busy !== null}
+        className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 transition hover:text-slate-800 disabled:opacity-50 dark:text-slate-400 dark:hover:text-slate-100"
+      >
+        <RefreshCw size={12} /> Status aktualisieren
+      </button>
+
+      {message && <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{message}</p>}
+      {error && <p className="mt-2 text-xs font-semibold text-red-600 dark:text-red-300">{error}</p>}
+    </div>
   );
 }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ConversationProvider, useConversation } from '@elevenlabs/react';
 import { Mic, MicOff, Loader2, PhoneOff, AlertTriangle, Volume2 } from 'lucide-react';
-import { evaluateOralExam, abortOralExamSession } from '../../services/oralExam';
+import { evaluateOralExam, abortOralExamSession, confirmOralExamSession } from '../../services/oralExam';
 import type { OralExamTranscriptTurn } from '../../types';
 
 interface LiveState {
@@ -50,6 +50,8 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const conversation = useConversation({
         onConnect: ({ conversationId }) => {
             conversationIdRef.current = conversationId;
+            // Ab hier hat die Session real verbunden → Ticket zählt jetzt (connected_at).
+            if (!isMock) void confirmOralExamSession(state.sessionId);
             setPhase('live');
         },
         onDisconnect: () => {
@@ -82,6 +84,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const [agentSpeakingLive, setAgentSpeakingLive] = useState(false);
     const [evaluationProgress, setEvaluationProgress] = useState(0);
     const [microphoneBlocked, setMicrophoneBlocked] = useState(false);
+    const [showEndConfirm, setShowEndConfirm] = useState(false);
 
     const conversationIdRef = useRef<string | undefined>(undefined);
     const transcriptRef = useRef<OralExamTranscriptTurn[]>([]);
@@ -488,13 +491,47 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                     {!isMock && conversation.isMuted ? <MicOff size={22} /> : <Mic size={22} />}
                 </button>
                 <button
-                    onClick={() => void finish()}
+                    onClick={() => {
+                        if (isMock) { void finish(); return; }
+                        setShowEndConfirm(true);
+                    }}
                     className="flex-1 max-w-xs bg-red-500 hover:bg-red-600 text-white rounded-2xl px-6 py-4 font-black flex items-center justify-center gap-2 shadow-lg shadow-red-500/20 active:scale-[0.98] transition-all"
                 >
                     <PhoneOff size={20} strokeWidth={2.5} /> {isMock ? 'Mock neu laden' : 'Prüfung beenden'}
                 </button>
                 </div>
             </div>
+
+            {showEndConfirm && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 px-4 pb-4 pt-10 backdrop-blur-sm sm:items-center sm:pb-10">
+                    <div className="relative w-full max-w-md rounded-[28px] bg-white p-5 shadow-2xl dark:bg-slate-900">
+                        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300">
+                            <AlertTriangle size={24} strokeWidth={2.5} />
+                        </div>
+                        <h2 className="text-xl font-black text-slate-900 dark:text-white">Prüfung wirklich beenden?</h2>
+                        <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                            Die Prüfung ist noch nicht zu Ende. Wenn du jetzt beendest, wird dein bisheriges
+                            Gespräch ausgewertet und die Prüfung kann nicht fortgesetzt werden.
+                        </p>
+                        <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+                            <button
+                                type="button"
+                                onClick={() => { setShowEndConfirm(false); void finish(); }}
+                                className="w-full rounded-2xl bg-red-500 px-5 py-3 font-black text-white transition-all active:scale-95"
+                            >
+                                Beenden &amp; auswerten
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowEndConfirm(false)}
+                                className="w-full rounded-2xl border-2 border-slate-100 bg-white px-5 py-3 font-black text-slate-700 transition-all active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            >
+                                Weiter prüfen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
