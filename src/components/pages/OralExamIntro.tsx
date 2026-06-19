@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Mic, Loader2, Sparkles, ShieldCheck, Zap, Crown } from 'lucide-react';
+import { ArrowLeft, Mic, Loader2, Sparkles, ShieldCheck, Zap, Crown, VolumeX, X } from 'lucide-react';
 import { useApp } from '../../App';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import {
@@ -20,6 +20,7 @@ export default function OralExamIntro() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedMode, setSelectedMode] = useState<TestMode>('full_simulation');
+    const [showPrepDialog, setShowPrepDialog] = useState(false);
     const devAutoStartRef = useRef(false);
 
     const handleStart = async () => {
@@ -135,7 +136,7 @@ export default function OralExamIntro() {
 
             {/* Start */}
             <button
-                onClick={handleStart}
+                onClick={() => setShowPrepDialog(true)}
                 disabled={loading}
                 className="w-full bg-gradient-to-br from-violet-600 to-indigo-700 text-white rounded-[24px] p-5 shadow-lg shadow-violet-500/20 font-black text-lg flex items-center justify-center gap-3 transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
             >
@@ -150,8 +151,43 @@ export default function OralExamIntro() {
                 )}
             </button>
             <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-3">
-                Mikrofon-Zugriff wird benötigt. Du kannst jederzeit beenden.
+                Nach dem Start fragt dein Browser nach dem Mikrofon-Zugriff. Bitte bestätige die Anfrage.
             </p>
+
+            {showPrepDialog && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 px-4 pb-4 pt-10 backdrop-blur-sm sm:items-center sm:pb-10">
+                    <div className="relative w-full max-w-md rounded-[28px] bg-white p-5 shadow-2xl dark:bg-slate-900">
+                        <button
+                            type="button"
+                            onClick={() => setShowPrepDialog(false)}
+                            disabled={loading}
+                            aria-label="Schließen"
+                            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition-all active:scale-95 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-300"
+                        >
+                            <X size={20} strokeWidth={2.5} />
+                        </button>
+                        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+                            <VolumeX size={24} strokeWidth={2.5} />
+                        </div>
+                        <h2 className="text-xl font-black text-slate-900 dark:text-white">Für beste Ergebnisse</h2>
+                        <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                            Starte die Prüfung in einem ruhigen Raum. Vermeide Hintergrundgeräusche,
+                            Fernseher, Musik oder Gespräche im Hintergrund, damit deine Antworten sauber erkannt werden.
+                            Bestätige danach den Mikrofon-Zugriff im Browser — ohne Mikrofon kann die Prüfung nicht starten.
+                        </p>
+                        <div className="mt-6">
+                            <button
+                                type="button"
+                                onClick={() => void handleStart()}
+                                disabled={loading}
+                                className="w-full rounded-2xl bg-violet-600 px-5 py-3 font-black text-white transition-all active:scale-95 disabled:opacity-60"
+                            >
+                                {loading ? 'Vorbereiten…' : 'Verstanden, starten'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
     );

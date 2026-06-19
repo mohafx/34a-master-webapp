@@ -3,7 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
     ArrowLeft, Loader2, CheckCircle2, XCircle, Target, ThumbsUp,
     AlertCircle, BookOpen, Compass, ArrowRight, Mic, MessageSquare, Headphones,
-    Sparkles, MinusCircle, RefreshCw,
+    MinusCircle, RefreshCw,
 } from 'lucide-react';
 import { usePostHog } from '../../contexts/PostHogProvider';
 import { getOralExamSession, getOralExamAudioUrl, retryOralExamEvaluation } from '../../services/oralExam';
@@ -59,9 +59,22 @@ export default function OralExamResults() {
     const [session, setSession] = useState<OralExamSession | null>(null);
     const trackedRef = useRef(false);
 
+    const lastSessionIdRef = useRef<string | undefined>(undefined);
+
     // Lädt Bewertung (falls nicht im State) + Audio-URL (immer, via audio_path).
     useEffect(() => {
         let cancelled = false;
+
+        const isNewSession = lastSessionIdRef.current !== sessionId;
+        lastSessionIdRef.current = sessionId;
+
+        if (isNewSession) {
+            setLoading(true);
+            setError(null);
+            setEvaluation(navState.result ?? null);
+            setAudioUrl(null);
+        }
+
         (async () => {
             let evalData = navState.result ?? null;
             let audioPath: string | null = navState.result?.audio_path ?? null;
@@ -97,7 +110,10 @@ export default function OralExamResults() {
                     next_step: session.feedback?.next_step ?? '',
                 };
                 audioPath = session.audio_path;
-                if (!cancelled) setEvaluation(evalData);
+            }
+
+            if (!cancelled && evalData) {
+                setEvaluation(evalData);
             }
 
             if (audioPath) {
@@ -108,7 +124,7 @@ export default function OralExamResults() {
         })();
         return () => { cancelled = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sessionId]);
+    }, [sessionId, navState.result]);
 
     const canRetryEvaluation = !!sessionId && !!session?.transcript?.length;
     const handleRetryEvaluation = async () => {
@@ -121,6 +137,21 @@ export default function OralExamResults() {
             setRetrying(true);
             setError(null);
             const result = await retryOralExamEvaluation(sessionId);
+
+            // Set local states directly to ensure immediate UI feedback
+            setEvaluation(result);
+            setError(null);
+            if (result.audio_path) {
+                const url = await getOralExamAudioUrl(result.audio_path);
+                setAudioUrl(url);
+            }
+
+            // Refresh and sync the session model status
+            const updatedSession = await getOralExamSession(sessionId);
+            if (updatedSession) {
+                setSession(updatedSession);
+            }
+
             navigate(`/oral-exam/results/${sessionId}`, {
                 replace: true,
                 state: { result, mode: session?.mode },
@@ -187,12 +218,23 @@ export default function OralExamResults() {
         strengths, gaps, model_answers, roter_faden, next_step,
     } = evaluation;
     const answers = answer_evaluations ?? [];
+    const resultTone = passed
+        ? {
+            card: 'bg-gradient-to-br from-emerald-500 to-teal-600',
+            summary: 'bg-emerald-50 text-emerald-950 border-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-100 dark:border-emerald-900',
+            summaryText: 'text-emerald-900/90 dark:text-emerald-100/90',
+        }
+        : {
+            card: 'bg-gradient-to-br from-rose-500 to-red-600',
+            summary: 'bg-rose-50 text-rose-950 border-rose-100 dark:bg-rose-950/40 dark:text-rose-100 dark:border-rose-900',
+            summaryText: 'text-rose-900/90 dark:text-rose-100/90',
+        };
 
     return (
         <div className="max-w-3xl mx-auto px-4 pb-32">
-            {/* Header / Score */}
+            {/* Header / Score + KI-Zusammenfassung */}
             <div className="pt-3 mb-6">
-                <div className={`rounded-3xl md:rounded-[2rem] p-6 md:p-10 text-white shadow-card relative overflow-hidden ${passed ? 'bg-gradient-to-br from-emerald-500 to-teal-600' : 'bg-gradient-to-br from-rose-500 to-red-600'}`}>
+                <div className={`p-6 md:p-10 text-white shadow-card relative overflow-hidden ${resultTone.card} ${summary ? 'rounded-t-3xl md:rounded-t-[2rem]' : 'rounded-3xl md:rounded-[2rem]'}`}>
                     <div className="absolute top-0 right-0 w-80 h-80 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/3 blur-3xl pointer-events-none" />
                     <div className="flex items-center justify-between mb-6 relative z-10">
                         <button
@@ -213,20 +255,14 @@ export default function OralExamResults() {
                         <p className="text-white/80 text-sm mt-2">Bestehensgrenze: 50 %</p>
                     </div>
                 </div>
-            </div>
 
-            {/* KI-Zusammenfassung */}
-            {summary && (
-                <div className="rounded-[24px] p-5 md:p-6 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 mb-4 flex gap-3">
-                    <span className="w-9 h-9 rounded-xl bg-violet-600 text-white flex items-center justify-center flex-shrink-0">
-                        <Sparkles size={18} />
-                    </span>
-                    <div>
-                        <h2 className="font-black text-base text-violet-900 dark:text-violet-200 mb-1">Zusammenfassung des Prüfers</h2>
-                        <p className="text-sm text-violet-900/90 dark:text-violet-200/90 leading-relaxed">{summary}</p>
+                {summary && (
+                    <div className={`rounded-b-3xl border-x border-b p-5 md:p-6 shadow-sm ${resultTone.summary}`}>
+                        <h2 className="font-black text-base mb-2">Zusammenfassung des Prüfers</h2>
+                        <p className={`text-sm leading-relaxed ${resultTone.summaryText}`}>{summary}</p>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
 
             {/* Audio-Wiedergabe */}
             {audioUrl && (

@@ -181,6 +181,7 @@ serve(async (req) => {
 
         const candidateName = await getCandidateFirstName(user.id);
         const signedUrl = await fetchElevenLabsSignedUrl();
+        const sessionSeed = crypto.randomUUID().slice(0, 8);
 
         return new Response(
             JSON.stringify({
@@ -192,6 +193,7 @@ serve(async (req) => {
                     mode,
                     focus_topic: focusTopic ?? "alle",
                     candidate_name: candidateName,
+                    session_seed: sessionSeed,
                 },
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }

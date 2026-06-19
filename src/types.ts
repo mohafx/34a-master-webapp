@@ -252,6 +252,7 @@ export interface OralExamStartResponse {
     mode: string;
     focus_topic: string;
     candidate_name: string;
+    session_seed: string;
   };
 }
 

@@ -1,9 +1,9 @@
 ---
 title: KI-Mündliche-Prüfungssimulation — Umsetzung (As-Built) & Phasen
 scope: Produkt / Technische Umsetzung
-status: Phase 5 — Frontend gebaut, Admin-only Soft-Launch, bereit für lokalen Live-Test
-last_verified: 2026-06-18
-last_updated: 2026-06-18
+status: Phase 5 — Frontend gebaut, Admin-only Soft-Launch, Live-Flow stabilisiert
+last_verified: 2026-06-19
+last_updated: 2026-06-19
 ---
 
 # Mündliche Prüfungssimulation — Wie es gebaut ist & wo wir stehen
@@ -81,6 +81,13 @@ Browser (React 19 SPA)
   (mündliche Sektion nur für Admin sichtbar). `OralExamHistory.tsx` weiterhin unter
   `/oral-exam/history` erreichbar (intern).
 - `OralExamIntro.tsx` hat **keinen** „Frühere Durchläufe"-Button mehr.
+- `OralExamIntro.tsx` zeigt vor dem Start ein Pflicht-Popup „Für beste Ergebnisse" (ruhiger Raum,
+  keine Hintergrundgeräusche, Mikrofon-Zugriff bestätigen). Erst nach „Verstanden, starten" wird die
+  Session vorbereitet.
+- `OralExamLive.tsx` nutzt ein fixiertes `100dvh`-Layout: die Seite selbst scrollt nicht, nur das
+  Transkriptfenster. Neue Prüfer-/Nutzer-Nachrichten scrollen automatisch zum letzten Text.
+- `OralExamResults.tsx` verbindet Score-Karte und „Zusammenfassung des Prüfers" visuell zu einem
+  Statusblock; die Zusammenfassung nutzt eine hellere Variante der Bestanden-/Nicht-bestanden-Farbe.
 - Analytics: Events `oral_exam_started` / `oral_exam_completed` in `contexts/PostHogProvider.tsx`
 - Dependency: `@elevenlabs/react`
 
@@ -92,8 +99,11 @@ Browser (React 19 SPA)
 ## 4. ElevenLabs-Agent
 - „34a Master – Mündliche Prüfung (**Herr Müller**)", Sprache **de**, Modell `eleven_flash_v2_5`.
 - `agent_id` liegt als Supabase-Secret `ELEVENLABS_AGENT_ID` (nicht im Repo).
-- Dynamic Variables: `mode`, `focus_topic`, `candidate_name`.
-- Prüfer-Name (im Prompt **und** in der UI [`OralExamLive.tsx`]) = **Herr Müller** (per API gesetzt 2026-06-18).
+- Dynamic Variables: `mode`, `focus_topic`, `candidate_name`, `session_seed`.
+- Prüfer-Name (im Prompt **und** in der UI [`OralExamLive.tsx`]) = **Herr Müller**.
+- Aktueller Agent-Stand (per API gesetzt und verifiziert 2026-06-19): `full_simulation`, 6 Hauptfälle,
+  1-2 Rückfragen, `max_duration_seconds=720`, `temperature=0.7`, abwechslungsreiche Fallauswahl über
+  `{{session_seed}}`. Der alte Modus `full_test_6q` ist entfernt.
 
 ### 4a. Ein Agent, kein zweiter (Architekturentscheidung 2026-06-18)
 **Bewusst genau EIN Agent** statt getrennter Agenten für Abonnenten/Nicht-Abonnenten. Begründung:
@@ -125,10 +135,22 @@ Prüfer-Abschlusses zu testen. Mechanik:
   Nicht-Admins wirkungslos (kein Missbrauch möglich).
 
 ## 4d. Sprech-Animationen (UI, `OralExamLive.tsx`)
-- **Prüfer spricht** (`conversation.isSpeaking`): weißer Puls-Ring + `Volume2`-Icon.
-- **Nutzer spricht**: `getInputVolume()` wird per `requestAnimationFrame` gepollt; ab Pegel > 0,04
+- **Prüfer spricht**: primär über den hörbaren Ausgangspegel `getOutputVolume()` plus SDK-Modus
+  (`isSpeaking`/`mode`) ermittelt. Dadurch hängt die Anzeige nicht an verspäteten oder vorgezogenen
+  Transkript-Events.
+- **Nutzer spricht**: `getInputVolume()` wird per `requestAnimationFrame` gepollt; ab Pegel > 0,025
   erscheint ein **pegelreaktiver emerald-Ring** (skaliert mit der Lautstärke) + Status „Du sprichst…".
   Bei stummem Mikro 0 → Status „Mikrofon stumm".
+
+## 4e. Live-Flow-Stabilisierung (2026-06-19)
+- `full_simulation` ist der kanonische Vollmodus; `full_5min` bleibt nur Legacy-kompatibel.
+- `oral-exam-session` sendet pro Session einen zufälligen `session_seed` an ElevenLabs, damit Fälle,
+  Reihenfolge, Orte und Personen variieren.
+- Mikrofon-Zugriff wird vor dem ElevenLabs-Start explizit geprüft. Wenn der Browser den Zugriff nicht
+  bestätigt, zeigt die UI einen Fehler mit „Mikrofon-Zugriff erneut erlauben".
+- ElevenLabs-Regie-Tags wie `[happy]` werden im Live-Transkript und vor der Auswertung entfernt.
+- DevPanel-Mock bleibt rein lokal (`?devMock=1`): kein Admin, keine Session, kein Mikrofon, kein
+  ElevenLabs. Gleiche Fragen im Mock sind absichtlich feste Testdaten.
 
 ## 5. Gating
 | Nutzer | Verhalten (Soft-Launch) |

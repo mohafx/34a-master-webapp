@@ -2,7 +2,7 @@
 title: KI-Mündliche-Prüfungssimulation — Funktionsweise (vollständige Referenz)
 scope: Produkt / Technik — wie es funktioniert & bewertet
 status: aktiv (Admin-only Soft-Launch)
-last_verified: 2026-06-18
+last_verified: 2026-06-19
 ---
 
 # Mündliche Prüfungssimulation — wie sie funktioniert & bewertet
@@ -36,6 +36,7 @@ Zwei KI-Bausteine, klar getrennt:
 /exam  ──(Admin)──▶  Karte "Mündliche Prüfung"  ──▶  /oral-exam (Intro)
    │
    │  Intro: Kurzinfo + Test-Modus-Wahl (Free/Premium, Admin) + "Mündliche Prüfung starten" (alle Themen)
+   │  Vor dem Start: Pflicht-Popup zu ruhigem Raum, Hintergrundgeräuschen und Mikrofon-Zugriff
    ▼
 /oral-exam/live
    │  1. Mikrofon-Freigabe (Browser-Prompt)
@@ -68,7 +69,7 @@ OralExamIntro
                                                  · Zeile in oral_exam_sessions (running)
                                                  · Signed URL holen ──────────▶ ElevenLabs
                                                                                  get-signed-url
-     ◀── { sessionId, mode, maxDurationSec, signedUrl, dynamicVariables } ──┘
+     ◀── { sessionId, mode, maxDurationSec, signedUrl, dynamicVariables inkl. session_seed } ──┘
 
 OralExamLive (@elevenlabs/react)
   useConversation.startSession({ signedUrl, connectionType:'websocket', dynamicVariables })
@@ -121,6 +122,8 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 4. **Free-Gating:** Nicht-Premium mit bereits 1 abgeschlossenem Gratis-Test ⇒ `200 {paywallRequired:true}`.
 5. **Session anlegen:** Zeile in `oral_exam_sessions` mit `status='running'`.
 6. **Signed URL:** von ElevenLabs holen (`xi-api-key` bleibt serverseitig).
+7. **Session-Seed:** zufälliger `session_seed` wird erzeugt und als Dynamic Variable an ElevenLabs
+   übergeben, damit neue Sessions andere Fälle/Reihenfolgen nutzen.
 
 **Erfolg (`200`):**
 ```json
@@ -129,7 +132,7 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
   "mode": "full_simulation",            // | "free_test_3q"
   "maxDurationSec": 720,          // 720 (voll) | 180 (free)
   "signedUrl": "wss://…",
-  "dynamicVariables": { "mode": "full_simulation", "focus_topic": "alle", "candidate_name": "Max" }
+  "dynamicVariables": { "mode": "full_simulation", "focus_topic": "alle", "candidate_name": "Max", "session_seed": "a1b2c3d4" }
 }
 ```
 
@@ -149,7 +152,10 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 - Sprache **Deutsch**, Modell `eleven_flash_v2_5` (niedrige Latenz), Max-Dauer 720 s als Kosten-Backstop.
 - **`agent_id` ist KEIN Repo-Wert** — liegt als Supabase-Secret `ELEVENLABS_AGENT_ID`.
 - **Dynamic Variables** (vom Backend gesetzt, im Agent-Prompt nutzbar): `mode`, `focus_topic`,
-  `candidate_name` → erlauben Personalisierung & Modus-abhängiges Verhalten (3 Fälle vs. volle Simulation).
+  `candidate_name`, `session_seed` → erlauben Personalisierung, Modus-abhängiges Verhalten
+  (3 Fälle vs. volle Simulation) und abwechslungsreiche Fallauswahl pro Session.
+- Aktueller Agent-Stand (verifiziert 2026-06-19): `full_simulation`, 6 Hauptfälle, 1-2 Rückfragen,
+  `temperature=0.7`, `max_duration_seconds=720`, abwechslungsreiche Szenarien per `{{session_seed}}`.
 - **Rolle des Agents:** stellt praxisnahe Fallbeispiele, fragt dynamisch nach („Warum?", „Und wenn …?"),
   benotet **nicht laut** (Bewertung passiert separat in Schritt 3), beendet neutral.
 
@@ -158,8 +164,17 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 - Muss in `<ConversationProvider>` gewrappt sein; `useConversation({ onConnect, onMessage, onDisconnect, onError })`.
 - Start: zuerst `getUserMedia({audio:true})` (saubere Mikro-Freigabe), dann
   `startSession({ signedUrl, connectionType:'websocket', dynamicVariables })`.
+- Wenn die Mikrofon-Freigabe verweigert wird, zeigt die UI einen Fehler mit Retry-Button. Der Retry
+  wird durch einen Nutzerklick ausgelöst, damit iOS, Android und Desktop-Browser die Berechtigungsabfrage
+  erneut anzeigen können, sofern der Browser sie nicht dauerhaft blockiert hat.
 - `onConnect({conversationId})` → ID merken (für die Auswertung).
 - `onMessage({message, role})` → Live-Transkript; `role:'agent'`→`examiner`, sonst `candidate`.
+- Regie-/Emotions-Tags in eckigen Klammern (`[happy]`, `[slow]` usw.) werden aus UI-Transkript und
+  Bewertungs-Transkript entfernt.
+- Sprechstatus: „Der Prüfer spricht…" basiert primär auf `getOutputVolume()` und nicht allein auf
+  Transkript-Events. „Du sprichst…" basiert auf `getInputVolume()`.
+- Layout: Der Live-Screen ist ein fixierter `100dvh`-Layer. Die Seite selbst scrollt nicht; nur das
+  Transkriptfenster ist scrollbar und scrollt bei jeder neuen Nachricht automatisch zum letzten Text.
 - Beenden: „Prüfung beenden", Timer-Ablauf oder `onDisconnect` ⇒ `finish()` (doppelter Aufruf wird
   hart verhindert). Verlassen ohne Abschluss ⇒ `abortOralExamSession` + `endSession`.
 
@@ -225,6 +240,8 @@ Score + Erklärung in `gaps`, `passed` muss konsistent zu `overall_score_pct` se
 > Prüfer-Frage Score + `verdict` + Empfehlung) liegen in der DB im `feedback`-JSON. Die
 > Ergebnis-Seite zeigt sie als „Zusammenfassung des Prüfers", „Deine Antworten im Detail" und (falls
 > `audio_path` gesetzt) einen Audio-Player über eine **signierte URL** (`getOralExamAudioUrl`, 1 h).
+> Die Zusammenfassung ist visuell mit der Score-Karte verbunden und nutzt eine hellere Variante der
+> Bestanden-/Nicht-bestanden-Farbe.
 
 > Der Score wird serverseitig auf 0–100 geklemmt/gerundet und `passed = overall_score_pct >= 50`
 > **autoritativ** neu gesetzt (unabhängig davon, was das Modell für `passed` lieferte).
@@ -344,6 +361,9 @@ Status: live gesetzt und funktionsfähig (belegt durch erfolgreiche Session-Zeil
 | `403 feature_not_available` | Kein Admin — erwartet im Soft-Launch |
 | `paywallRequired` | Nicht-Premium nach Gratis-Test (öffentlicher Launch) |
 | Kein Ton / keine Verbindung | Mikro-Freigabe verweigert; `ELEVENLABS_*`-Secrets prüfen; `signedUrl` abgelaufen |
+| Gleiche Fragen im Dev-Mock | Erwartet: `?devMock=1` nutzt feste lokale Testdaten, keine echte ElevenLabs-Session |
+| Gleiche Fragen in Live-Sessions | Agent-Prompt/Temperature/`session_seed` prüfen; Stand 2026-06-19 nutzt `temperature=0.7` und `session_seed` |
+| Status zeigt falschen Sprecher | `getOutputVolume()`/`getInputVolume()` prüfen; Transkript-Events dürfen nicht allein als Audio-Status dienen |
 | „Kein Transkript verfügbar" | Gespräch zu kurz / leer; ElevenLabs-Conversation noch nicht fertig (Retry greift) |
 | Auswertung schlägt fehl | `OPENAI_API_KEY` fehlt/ungültig; OpenAI-Antwort nicht schema-valide; Session wird bei vorhandenem Transkript `evaluation_failed` |
 | Session bleibt `running` / `aborted` | Altfall oder Abbruch ohne erfolgreiche Auswertung → wird im Verlauf sichtbar; ohne gespeichertes Transkript ist nur „Neue Prüfung starten“ möglich |

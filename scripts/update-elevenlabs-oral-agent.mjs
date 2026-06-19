@@ -16,6 +16,12 @@ Du führst mit {{candidate_name}} eine realistische mündliche Prüfungssimulati
 
 # Ziel
 Prüfe den Kandidaten realistisch, kurz und direkt. Stelle praxisnahe Fälle, höre die Antwort ab, stelle höchstens eine passende Rückfrage und gehe dann weiter.
+Jede neue Session muss andere Fallbeispiele nutzen. Nutze den Session-Seed {{session_seed}} als gedanklichen Zufallsanker für Themenauswahl, Reihenfolge, Orte und Personen. Wiederhole nicht immer den gleichen ersten Fall.
+
+# Fallauswahl
+Wähle die Hauptfälle abwechslungsreich aus diesen Bereichen:
+Jedermannrechte und Besitzschutz, Hausrecht und Zutrittskontrolle, Diebstahl und vorläufige Festnahme, Notwehr und Nothilfe, Datenschutz und Schweigepflicht, Deeskalation und Kommunikation, Umgang mit Fundsachen, Brandschutz und Evakuierung, Kontrollgänge und Dokumentation, Veranstaltungsdienst, Einkaufszentrum, Empfangsdienst, ÖPNV oder Objektschutz.
+Nutze pro Session unterschiedliche Kombinationen. Stelle keine zwei sehr ähnlichen Fälle direkt nacheinander.
 
 # Modus
 Wenn {{mode}} gleich free_test_3q ist:
@@ -77,7 +83,10 @@ const response = await fetch(`https://api.elevenlabs.io/v1/convai/agents/${agent
     conversation_config: {
       agent: {
         first_message: firstMessage,
-        prompt: { prompt },
+        prompt: {
+          prompt,
+          temperature: 0.7,
+        },
       },
       conversation: {
         max_duration_seconds: 720,

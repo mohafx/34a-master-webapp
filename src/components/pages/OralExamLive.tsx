@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ConversationProvider, useConversation } from '@elevenlabs/react';
 import { Mic, MicOff, Loader2, PhoneOff, AlertTriangle, Volume2 } from 'lucide-react';
@@ -16,8 +16,6 @@ interface LiveState {
 }
 
 type Phase = 'permission' | 'connecting' | 'live' | 'evaluating' | 'error';
-type SpeakerHint = 'examiner' | 'candidate' | null;
-
 function formatTime(sec: number): string {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
@@ -62,10 +60,8 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             const cleaned = cleanOralExamMessage(message ?? '');
             if (!cleaned) return;
             const normalizedRole = role === 'agent' ? 'examiner' : 'candidate';
-            if (normalizedRole === 'examiner') {
-                setSpeakerHint('examiner');
-            } else {
-                setSpeakerHint('candidate');
+            if (normalizedRole === 'candidate') {
+                lastUserVoiceAtRef.current = Date.now();
             }
             setTranscript((prev) => [
                 ...prev,
@@ -83,17 +79,57 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const [transcript, setTranscript] = useState<OralExamTranscriptTurn[]>(isMock ? MOCK_TRANSCRIPT : []);
     const [remaining, setRemaining] = useState(state.maxDurationSec);
     const [inputLevel, setInputLevel] = useState(0);
+    const [agentSpeakingLive, setAgentSpeakingLive] = useState(false);
     const [evaluationProgress, setEvaluationProgress] = useState(0);
-    const [speakerHint, setSpeakerHint] = useState<SpeakerHint>(null);
+    const [microphoneBlocked, setMicrophoneBlocked] = useState(false);
 
     const conversationIdRef = useRef<string | undefined>(undefined);
     const transcriptRef = useRef<OralExamTranscriptTurn[]>([]);
     const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+    const transcriptBottomRef = useRef<HTMLDivElement | null>(null);
+    const agentSpeakingSinceRef = useRef<number | null>(null);
+    const lastUserVoiceAtRef = useRef(0);
     const startedRef = useRef(false);
     const finishingRef = useRef(false);
     const startTimeRef = useRef<number>(0);
 
     transcriptRef.current = transcript;
+
+    const startLiveSession = useCallback(async () => {
+        if (isMock) return;
+
+        setMicrophoneBlocked(false);
+        setErrorMsg(null);
+        setPhase('permission');
+
+        try {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                throw new Error('mediaDevicesUnsupported');
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach((track) => track.stop());
+        } catch (_) {
+            setMicrophoneBlocked(true);
+            setErrorMsg('Mikrofon-Zugriff wurde nicht bestätigt. Deshalb kann die mündliche Prüfung nicht gestartet werden. Bitte erlaube den Mikrofon-Zugriff im Browser und versuche es erneut.');
+            setPhase('error');
+            startedRef.current = false;
+            return;
+        }
+
+        setPhase('connecting');
+        startTimeRef.current = Date.now();
+        try {
+            await conversation.startSession({
+                signedUrl: state.signedUrl,
+                connectionType: 'websocket',
+                dynamicVariables: state.dynamicVariables,
+            });
+        } catch (err) {
+            setErrorMsg(err instanceof Error ? err.message : 'Verbindung zum Prüfer fehlgeschlagen.');
+            setPhase('error');
+            startedRef.current = false;
+        }
+    }, [conversation, isMock, state.dynamicVariables, state.signedUrl]);
 
     // Auswertung + Weiterleitung. Mehrfachaufruf wird hart unterbunden.
     const finish = useCallback(async () => {
@@ -148,31 +184,8 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         if (isMock) return;
         if (startedRef.current) return;
         startedRef.current = true;
-
-        (async () => {
-            try {
-                await navigator.mediaDevices.getUserMedia({ audio: true });
-            } catch (_) {
-                setErrorMsg('Mikrofon-Zugriff wurde abgelehnt. Bitte erlaube den Zugriff und versuche es erneut.');
-                setPhase('error');
-                return;
-            }
-
-            setPhase('connecting');
-            startTimeRef.current = Date.now();
-            try {
-                await conversation.startSession({
-                    signedUrl: state.signedUrl,
-                    connectionType: 'websocket',
-                    dynamicVariables: state.dynamicVariables,
-                });
-            } catch (err) {
-                setErrorMsg(err instanceof Error ? err.message : 'Verbindung zum Prüfer fehlgeschlagen.');
-                setPhase('error');
-            }
-        })();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isMock]);
+        void startLiveSession();
+    }, [isMock, startLiveSession]);
 
     // Countdown — nur während die Prüfung läuft.
     useEffect(() => {
@@ -185,17 +198,31 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         return () => clearTimeout(t);
     }, [phase, remaining, finish, isMock]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const el = transcriptScrollRef.current;
         if (!el) return;
-        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        const scrollToLatest = (behavior: ScrollBehavior) => {
+            el.scrollTo({ top: el.scrollHeight, behavior });
+            transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior });
+        };
+        scrollToLatest('auto');
+        requestAnimationFrame(() => {
+            scrollToLatest('smooth');
+            window.setTimeout(() => scrollToLatest('auto'), 120);
+        });
     }, [transcript]);
 
     useEffect(() => {
-        if (speakerHint !== 'examiner') return;
-        const timeout = window.setTimeout(() => setSpeakerHint(null), 2400);
-        return () => window.clearTimeout(timeout);
-    }, [speakerHint, transcript.length]);
+        if (phase === 'error' || phase === 'evaluating') return;
+        const previousBodyOverflow = document.body.style.overflow;
+        const previousHtmlOverflow = document.documentElement.style.overflow;
+        document.body.style.overflow = 'hidden';
+        document.documentElement.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = previousBodyOverflow;
+            document.documentElement.style.overflow = previousHtmlOverflow;
+        };
+    }, [phase]);
 
     // Fortschritt während der Auswertung. Die echten Schritte passieren serverseitig
     // ohne Streaming; deshalb steigt der Wert bis 95 % und springt erst bei Erfolg auf 100 %.
@@ -210,22 +237,47 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         return () => window.clearInterval(timer);
     }, [phase]);
 
-    // Mikrofon-Pegel des Nutzers pollen → treibt die "Du sprichst"-Animation.
+    // ElevenLabs-Sprechstatus und Mikrofon-Pegel direkt pollen. So hängt die Anzeige
+    // nicht an verspäteten Transkript-Events.
     useEffect(() => {
         if (isMock) {
             setInputLevel(0.18);
+            setAgentSpeakingLive(false);
             return;
         }
         if (phase !== 'live') {
             setInputLevel(0);
+            setAgentSpeakingLive(false);
             return;
         }
         let raf = 0;
         const tick = () => {
             try {
                 // 0..1; bei stummem Mikro 0. getInputVolume kann kurz nach Connect werfen → guard.
+                const now = Date.now();
                 const v = conversation.getInputVolume?.() ?? 0;
-                setInputLevel(conversation.isMuted ? 0 : v);
+                const outputVolume = conversation.getOutputVolume?.() ?? 0;
+                const nextInputLevel = conversation.isMuted ? 0 : v;
+                const userIsAudiblySpeaking = nextInputLevel > 0.025;
+                if (userIsAudiblySpeaking) {
+                    lastUserVoiceAtRef.current = now;
+                }
+
+                const agentAudioIsAudible = outputVolume > 0.012;
+                const rawAgentSpeaking = Boolean(conversation.isSpeaking || conversation.mode === 'speaking');
+                if (rawAgentSpeaking && agentSpeakingSinceRef.current === null) {
+                    agentSpeakingSinceRef.current = now;
+                }
+                if (!rawAgentSpeaking) {
+                    agentSpeakingSinceRef.current = null;
+                }
+
+                const agentSpeakingStartedAt = agentSpeakingSinceRef.current ?? now;
+                const agentSpeakingTimedOut = now - agentSpeakingStartedAt > 12000 && !agentAudioIsAudible;
+                const userJustSpoke = now - lastUserVoiceAtRef.current < 700;
+
+                setInputLevel(nextInputLevel);
+                setAgentSpeakingLive(agentAudioIsAudible || (rawAgentSpeaking && !agentSpeakingTimedOut && !userJustSpoke && !userIsAudiblySpeaking));
             } catch (_) {
                 /* noch nicht bereit */
             }
@@ -254,12 +306,39 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                 </div>
                 <h1 className="font-black text-xl text-slate-900 dark:text-white mb-2">Etwas ist schiefgelaufen</h1>
                 <p className="text-slate-600 dark:text-slate-300 mb-8 text-sm">{errorMsg}</p>
-                <div className="flex gap-3 justify-center">
+                {microphoneBlocked && (
+                    <p className="mx-auto -mt-4 mb-6 max-w-md text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                        Falls keine Abfrage erscheint, wurde das Mikrofon eventuell dauerhaft blockiert.
+                        Öffne dann die Browser- oder Geräteeinstellungen und erlaube den Mikrofon-Zugriff für diese Seite.
+                    </p>
+                )}
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    {microphoneBlocked ? (
+                        <button
+                            onClick={() => {
+                                startedRef.current = true;
+                                void startLiveSession();
+                            }}
+                            className="px-6 py-3 rounded-2xl bg-violet-600 text-white font-bold active:scale-95 transition-all inline-flex items-center justify-center gap-2"
+                        >
+                            <Mic size={18} /> Mikrofon-Zugriff erneut erlauben
+                        </button>
+                    ) : (
+                        <button
+                            onClick={() => {
+                                startedRef.current = true;
+                                void startLiveSession();
+                            }}
+                            className="px-6 py-3 rounded-2xl bg-violet-600 text-white font-bold active:scale-95 transition-all"
+                        >
+                            Erneut versuchen
+                        </button>
+                    )}
                     <button
                         onClick={() => navigate('/oral-exam', { replace: true })}
-                        className="px-6 py-3 rounded-2xl bg-violet-600 text-white font-bold active:scale-95 transition-all"
+                        className="px-6 py-3 rounded-2xl bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold active:scale-95 transition-all"
                     >
-                        Erneut versuchen
+                        Zur Vorbereitung
                     </button>
                 </div>
             </div>
@@ -297,16 +376,16 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const connecting = phase === 'permission' || phase === 'connecting';
     // Nutzer spricht: nur wenn der Prüfer schweigt und genug Mikrofonpegel ankommt.
     const isMuted = !isMock && conversation.isMuted;
-    const userSpeaking = !isMock && !connecting && !isMuted && inputLevel > 0.04;
-    const isExaminerSpeaking = !isMock && !userSpeaking && speakerHint === 'examiner';
+    const userSpeaking = !isMock && !connecting && !isMuted && !agentSpeakingLive && inputLevel > 0.025;
+    const isExaminerSpeaking = !isMock && !userSpeaking && agentSpeakingLive;
     // Pegel-getriebene Skalierung des Nutzer-Rings (gedeckelt, damit es nicht springt).
     const userScale = 1 + Math.min(inputLevel * 2.2, 0.45);
 
     return (
-        <div className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] md:pb-8">
+        <div className="fixed inset-0 z-30 mx-auto flex h-[100dvh] w-full max-w-2xl flex-col overflow-hidden bg-[#F2F4F6] px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] dark:bg-slate-950 md:pb-8">
             {/* Status-Bühne */}
-            <div className="pt-4 mb-4 md:pt-6 md:mb-6">
-                <div className="bg-gradient-to-br from-violet-600 to-indigo-800 text-white rounded-[2rem] p-6 md:p-10 shadow-card relative overflow-hidden flex flex-col items-center text-center min-h-[260px] md:min-h-[340px] justify-center">
+            <div className="flex-none pt-3 mb-3 md:pt-6 md:mb-6">
+                <div className="bg-gradient-to-br from-violet-600 to-indigo-800 text-white rounded-[2rem] p-5 md:p-10 shadow-card relative overflow-hidden flex flex-col items-center text-center min-h-[210px] md:min-h-[340px] justify-center">
                     <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/3 blur-3xl pointer-events-none" />
 
                     {/* Timer */}
@@ -315,13 +394,13 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                     </div>
 
                     {/* Avatar / Animation */}
-                    <div className="relative z-10 mb-6 flex items-center justify-center w-32 h-32">
+                    <div className="relative z-10 mb-4 flex items-center justify-center w-24 h-24 md:mb-6 md:h-32 md:w-32">
                         {/* Nutzer-Sprech-Ring: pegelreaktiv (emerald) */}
                         {userSpeaking && (
                             <>
                                 <span
                                     className="absolute rounded-full bg-emerald-400/20 transition-transform duration-75"
-                                    style={{ width: '8rem', height: '8rem', transform: `scale(${userScale})` }}
+                                    style={{ width: '6rem', height: '6rem', transform: `scale(${userScale})` }}
                                 />
                                 <span className="absolute inset-0 rounded-full border-2 border-emerald-300/50 animate-ping" />
                             </>
@@ -332,7 +411,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                         )}
 
                         <div
-                            className={`w-28 h-28 rounded-full flex items-center justify-center transition-all duration-200 ${isExaminerSpeaking
+                            className={`w-20 h-20 md:h-28 md:w-28 rounded-full flex items-center justify-center transition-all duration-200 ${isExaminerSpeaking
                                 ? 'bg-white/25 scale-110 shadow-2xl shadow-white/30'
                                 : userSpeaking
                                     ? 'bg-emerald-400/25 shadow-2xl shadow-emerald-400/30'
@@ -341,11 +420,11 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                             style={userSpeaking ? { transform: `scale(${1 + Math.min(inputLevel * 0.8, 0.18)})` } : undefined}
                         >
                             {connecting ? (
-                                <Loader2 size={44} className="animate-spin" />
+                                <Loader2 size={38} className="animate-spin md:size-11" />
                             ) : isExaminerSpeaking ? (
-                                <Volume2 size={44} strokeWidth={2} className="animate-pulse" />
+                                <Volume2 size={38} strokeWidth={2} className="animate-pulse md:size-11" />
                             ) : (
-                                <Mic size={44} strokeWidth={2} className={userSpeaking ? 'text-emerald-50' : ''} />
+                                <Mic size={38} strokeWidth={2} className={userSpeaking ? 'text-emerald-50 md:size-11' : 'md:size-11'} />
                             )}
                         </div>
                     </div>
@@ -370,18 +449,18 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             {/* Live-Transkript */}
             <div
                 ref={transcriptScrollRef}
-                className="min-h-0 flex-1 overflow-y-auto rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 md:max-h-[36rem]"
+                className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800"
             >
                 {transcript.length === 0 ? (
                     <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-6">
                         Das Gespräch erscheint hier live…
                     </p>
                 ) : (
-                    <div className="space-y-3">
+                    <div className="min-w-0 space-y-3">
                         {transcript.map((turn, i) => (
-                            <div key={i} className={turn.role === 'examiner' ? 'text-left' : 'text-right'}>
+                            <div key={i} className={`min-w-0 ${turn.role === 'examiner' ? 'text-left' : 'text-right'}`}>
                                 <span
-                                    className={`inline-block px-3.5 py-2 rounded-2xl text-sm max-w-[85%] ${turn.role === 'examiner'
+                                    className={`inline-block max-w-[92%] break-words rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${turn.role === 'examiner'
                                         ? 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100'
                                         : 'bg-violet-600 text-white'
                                         }`}
@@ -390,6 +469,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                                 </span>
                             </div>
                         ))}
+                        <div ref={transcriptBottomRef} className="h-1" />
                     </div>
                 )}
             </div>
