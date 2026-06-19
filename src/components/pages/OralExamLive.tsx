@@ -12,9 +12,11 @@ interface LiveState {
     maxDurationSec: number;
     mode: string;
     focusTopic: string | null;
+    mock?: boolean;
 }
 
 type Phase = 'permission' | 'connecting' | 'live' | 'evaluating' | 'error';
+type SpeakerHint = 'examiner' | 'candidate' | null;
 
 function formatTime(sec: number): string {
     const m = Math.floor(sec / 60);
@@ -22,8 +24,31 @@ function formatTime(sec: number): string {
     return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+function cleanOralExamMessage(text: string): string {
+    return text
+        .replace(/\[[A-Za-zÄÖÜäöüß\s-]+\]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+const MOCK_TRANSCRIPT: OralExamTranscriptTurn[] = [
+    {
+        role: 'examiner',
+        text: cleanOralExamMessage('[happy] Guten Tag. Sie sind im Objektschutz tätig und ein Besucher möchte ohne Ausweis eintreten. Wie verhalten Sie sich?'),
+    },
+    {
+        role: 'candidate',
+        text: 'Ich bleibe ruhig, verweigere den Zutritt und erkläre sachlich, dass ein gültiger Ausweis erforderlich ist.',
+    },
+    {
+        role: 'examiner',
+        text: 'Welche kommunikativen Mittel nutzen Sie, wenn der Besucher aggressiver wird?',
+    },
+];
+
 function OralExamLiveInner({ state }: { state: LiveState }) {
     const navigate = useNavigate();
+    const isMock = state.mock === true;
     const conversation = useConversation({
         onConnect: ({ conversationId }) => {
             conversationIdRef.current = conversationId;
@@ -34,10 +59,17 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             void finish();
         },
         onMessage: ({ message, role }) => {
-            if (!message?.trim()) return;
+            const cleaned = cleanOralExamMessage(message ?? '');
+            if (!cleaned) return;
+            const normalizedRole = role === 'agent' ? 'examiner' : 'candidate';
+            if (normalizedRole === 'examiner') {
+                setSpeakerHint('examiner');
+            } else {
+                setSpeakerHint('candidate');
+            }
             setTranscript((prev) => [
                 ...prev,
-                { role: role === 'agent' ? 'examiner' : 'candidate', text: message },
+                { role: normalizedRole, text: cleaned },
             ]);
         },
         onError: (message) => {
@@ -46,15 +78,17 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         },
     });
 
-    const [phase, setPhase] = useState<Phase>('permission');
+    const [phase, setPhase] = useState<Phase>(isMock ? 'live' : 'permission');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
-    const [transcript, setTranscript] = useState<OralExamTranscriptTurn[]>([]);
+    const [transcript, setTranscript] = useState<OralExamTranscriptTurn[]>(isMock ? MOCK_TRANSCRIPT : []);
     const [remaining, setRemaining] = useState(state.maxDurationSec);
     const [inputLevel, setInputLevel] = useState(0);
     const [evaluationProgress, setEvaluationProgress] = useState(0);
+    const [speakerHint, setSpeakerHint] = useState<SpeakerHint>(null);
 
     const conversationIdRef = useRef<string | undefined>(undefined);
     const transcriptRef = useRef<OralExamTranscriptTurn[]>([]);
+    const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
     const startedRef = useRef(false);
     const finishingRef = useRef(false);
     const startTimeRef = useRef<number>(0);
@@ -64,6 +98,10 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     // Auswertung + Weiterleitung. Mehrfachaufruf wird hart unterbunden.
     const finish = useCallback(async () => {
         if (finishingRef.current) return;
+        if (isMock) {
+            navigate('/oral-exam/live?devMock=1', { replace: true });
+            return;
+        }
         finishingRef.current = true;
         setEvaluationProgress(8);
         setPhase('evaluating');
@@ -81,7 +119,10 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         try {
             const result = await evaluateOralExam(
                 state.sessionId,
-                transcriptRef.current,
+                transcriptRef.current.map((turn) => ({
+                    ...turn,
+                    text: cleanOralExamMessage(turn.text),
+                })).filter((turn) => turn.text.length > 0),
                 durationS,
                 conversationIdRef.current
             );
@@ -100,10 +141,11 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             setEvaluationProgress(0);
             finishingRef.current = false;
         }
-    }, [conversation, navigate, remaining, state.maxDurationSec, state.mode, state.sessionId]);
+    }, [conversation, isMock, navigate, remaining, state.maxDurationSec, state.mode, state.sessionId]);
 
     // Start: Mikro-Permission holen, dann ElevenLabs-Session aufbauen (einmalig).
     useEffect(() => {
+        if (isMock) return;
         if (startedRef.current) return;
         startedRef.current = true;
 
@@ -130,18 +172,30 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             }
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [isMock]);
 
     // Countdown — nur während die Prüfung läuft.
     useEffect(() => {
-        if (phase !== 'live') return;
+        if (phase !== 'live' || isMock) return;
         if (remaining <= 0) {
             void finish();
             return;
         }
         const t = setTimeout(() => setRemaining((r) => r - 1), 1000);
         return () => clearTimeout(t);
-    }, [phase, remaining, finish]);
+    }, [phase, remaining, finish, isMock]);
+
+    useEffect(() => {
+        const el = transcriptScrollRef.current;
+        if (!el) return;
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }, [transcript]);
+
+    useEffect(() => {
+        if (speakerHint !== 'examiner') return;
+        const timeout = window.setTimeout(() => setSpeakerHint(null), 2400);
+        return () => window.clearTimeout(timeout);
+    }, [speakerHint, transcript.length]);
 
     // Fortschritt während der Auswertung. Die echten Schritte passieren serverseitig
     // ohne Streaming; deshalb steigt der Wert bis 95 % und springt erst bei Erfolg auf 100 %.
@@ -158,6 +212,10 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
 
     // Mikrofon-Pegel des Nutzers pollen → treibt die "Du sprichst"-Animation.
     useEffect(() => {
+        if (isMock) {
+            setInputLevel(0.18);
+            return;
+        }
         if (phase !== 'live') {
             setInputLevel(0);
             return;
@@ -175,12 +233,12 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         };
         raf = requestAnimationFrame(tick);
         return () => cancelAnimationFrame(raf);
-    }, [phase, conversation]);
+    }, [phase, conversation, isMock]);
 
     // Cleanup beim Verlassen ohne Abschluss → Session abbrechen + trennen.
     useEffect(() => {
         return () => {
-            if (!finishingRef.current) {
+            if (!isMock && !finishingRef.current) {
                 try { conversation.endSession(); } catch (_) { /* noop */ }
                 void abortOralExamSession(state.sessionId);
             }
@@ -236,18 +294,19 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         );
     }
 
-    const isExaminerSpeaking = conversation.isSpeaking;
     const connecting = phase === 'permission' || phase === 'connecting';
     // Nutzer spricht: nur wenn der Prüfer schweigt und genug Mikrofonpegel ankommt.
-    const userSpeaking = !connecting && !isExaminerSpeaking && !conversation.isMuted && inputLevel > 0.04;
+    const isMuted = !isMock && conversation.isMuted;
+    const userSpeaking = !isMock && !connecting && !isMuted && inputLevel > 0.04;
+    const isExaminerSpeaking = !isMock && !userSpeaking && speakerHint === 'examiner';
     // Pegel-getriebene Skalierung des Nutzer-Rings (gedeckelt, damit es nicht springt).
     const userScale = 1 + Math.min(inputLevel * 2.2, 0.45);
 
     return (
-        <div className="max-w-2xl mx-auto px-4 pb-32">
+        <div className="mx-auto flex min-h-[100dvh] max-w-2xl flex-col px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] md:pb-8">
             {/* Status-Bühne */}
-            <div className="pt-6 mb-6">
-                <div className="bg-gradient-to-br from-violet-600 to-indigo-800 text-white rounded-[2rem] p-8 md:p-10 shadow-card relative overflow-hidden flex flex-col items-center text-center min-h-[340px] justify-center">
+            <div className="pt-4 mb-4 md:pt-6 md:mb-6">
+                <div className="bg-gradient-to-br from-violet-600 to-indigo-800 text-white rounded-[2rem] p-6 md:p-10 shadow-card relative overflow-hidden flex flex-col items-center text-center min-h-[260px] md:min-h-[340px] justify-center">
                     <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/3 blur-3xl pointer-events-none" />
 
                     {/* Timer */}
@@ -299,15 +358,20 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                                 ? 'Der Prüfer spricht…'
                                 : userSpeaking
                                     ? 'Du sprichst…'
-                                    : conversation.isMuted
+                                    : isMuted
                                         ? 'Mikrofon stumm'
-                                        : 'Du bist dran — sprich jetzt.'}
+                                        : isMock
+                                            ? 'UI-Mock: keine Session, kein Mikrofon.'
+                                            : 'Du bist dran — sprich jetzt.'}
                     </p>
                 </div>
             </div>
 
             {/* Live-Transkript */}
-            <div className="bg-white dark:bg-slate-800 rounded-[24px] p-5 shadow-sm border border-slate-100 dark:border-slate-700 mb-6 max-h-72 overflow-y-auto no-scrollbar">
+            <div
+                ref={transcriptScrollRef}
+                className="min-h-0 flex-1 overflow-y-auto rounded-[24px] border border-slate-100 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 md:max-h-[36rem]"
+            >
                 {transcript.length === 0 ? (
                     <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-6">
                         Das Gespräch erscheint hier live…
@@ -331,21 +395,25 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             </div>
 
             {/* Steuerung */}
-            <div className="flex items-center justify-center gap-3">
+            <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/70 bg-[#F2F4F6]/95 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/95 md:static md:mt-6 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-0">
+                <div className="mx-auto flex max-w-2xl items-center justify-center gap-3">
                 <button
-                    onClick={() => conversation.setMuted(!conversation.isMuted)}
+                    onClick={() => {
+                        if (!isMock) conversation.setMuted(!conversation.isMuted);
+                    }}
                     disabled={connecting}
-                    className="w-14 h-14 rounded-2xl bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center shadow-sm active:scale-95 transition-all disabled:opacity-50"
-                    title={conversation.isMuted ? 'Mikrofon an' : 'Mikrofon stumm'}
+                    className="w-14 h-14 flex-shrink-0 rounded-2xl bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center shadow-sm active:scale-95 transition-all disabled:opacity-50"
+                    title={isMock ? 'UI-Mock' : conversation.isMuted ? 'Mikrofon an' : 'Mikrofon stumm'}
                 >
-                    {conversation.isMuted ? <MicOff size={22} /> : <Mic size={22} />}
+                    {!isMock && conversation.isMuted ? <MicOff size={22} /> : <Mic size={22} />}
                 </button>
                 <button
                     onClick={() => void finish()}
                     className="flex-1 max-w-xs bg-red-500 hover:bg-red-600 text-white rounded-2xl px-6 py-4 font-black flex items-center justify-center gap-2 shadow-lg shadow-red-500/20 active:scale-[0.98] transition-all"
                 >
-                    <PhoneOff size={20} strokeWidth={2.5} /> Prüfung beenden
+                    <PhoneOff size={20} strokeWidth={2.5} /> {isMock ? 'Mock neu laden' : 'Prüfung beenden'}
                 </button>
+                </div>
             </div>
         </div>
     );
@@ -354,13 +422,29 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
 export default function OralExamLive() {
     const location = useLocation();
     const navigate = useNavigate();
-    const state = location.state as LiveState | null;
+    const params = new URLSearchParams(location.search);
+    const isMock = params.get('devMock') === '1';
+    const state = isMock
+        ? ({
+            sessionId: 'dev-mock-oral-exam',
+            signedUrl: 'mock',
+            dynamicVariables: {
+                mode: 'full_simulation',
+                focus_topic: 'alle',
+                candidate_name: 'Dev',
+            },
+            maxDurationSec: 720,
+            mode: 'full_simulation',
+            focusTopic: null,
+            mock: true,
+        } satisfies LiveState)
+        : location.state as LiveState | null;
 
     useEffect(() => {
-        if (!state?.sessionId || !state?.signedUrl) {
+        if (!isMock && (!state?.sessionId || !state?.signedUrl)) {
             navigate('/oral-exam', { replace: true });
         }
-    }, [state, navigate]);
+    }, [isMock, state, navigate]);
 
     if (!state?.sessionId || !state?.signedUrl) {
         return null;

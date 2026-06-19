@@ -380,6 +380,11 @@ function AppContent() {
         localStorage.setItem('34a_dashboard_mode', 'lernplan');
         window.location.hash = '#/';
         break;
+      case 'oralExamLive':
+        setShowAuthDialog(false);
+        setShowPaywallDialog(false);
+        window.location.hash = '#/oral-exam/live?devMock=1';
+        break;
     }
 
     consumeShortcut();

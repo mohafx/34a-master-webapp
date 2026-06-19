@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Mic, Loader2, Sparkles, ShieldCheck, Zap, Crown } from 'lucide-react';
 import { useApp } from '../../App';
 import { usePostHog } from '../../contexts/PostHogProvider';
@@ -13,12 +13,14 @@ type TestMode = 'free_test_3q' | 'full_simulation';
 
 export default function OralExamIntro() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { openPaywall } = useApp();
     const { trackEvent } = usePostHog();
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedMode, setSelectedMode] = useState<TestMode>('full_simulation');
+    const devAutoStartRef = useRef(false);
 
     const handleStart = async () => {
         setLoading(true);
@@ -50,6 +52,14 @@ export default function OralExamIntro() {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        if (params.get('devStart') !== '1' || devAutoStartRef.current) return;
+        devAutoStartRef.current = true;
+        void handleStart();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.search]);
 
     return (
         <div className="max-w-4xl mx-auto px-4 pb-32">

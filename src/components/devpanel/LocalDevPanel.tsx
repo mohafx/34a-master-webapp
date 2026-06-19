@@ -20,6 +20,7 @@ const shortcuts: Array<{
   { id: 'auth', label: 'Auth öffnen' },
   { id: 'paywall', label: 'Paywall öffnen' },
   { id: 'lernplan', label: 'Lernplan öffnen' },
+  { id: 'oralExamLive', label: 'Mündliche Prüfung UI anzeigen' },
 ];
 
 
@@ -32,6 +33,8 @@ export function LocalDevPanel() {
     setOverrideState,
     clearOverrideState,
     openShortcut,
+    showExplanationImages,
+    setShowExplanationImages,
   } = useDevPanel();
 
   if (!enabled) return null;
@@ -105,6 +108,32 @@ export function LocalDevPanel() {
             </button>
           </div>
 
+          <div className="mb-4">
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+              Optionen
+            </p>
+            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/40">
+              <div>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Bilder in Erklärungen</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Grafiken ein- oder ausschalten</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExplanationImages(!showExplanationImages)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  showExplanationImages ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-700'
+                }`}
+                role="switch"
+                aria-checked={showExplanationImages}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    showExplanationImages ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
 
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">

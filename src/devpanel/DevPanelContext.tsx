@@ -3,7 +3,7 @@ import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { isLocalhostDev } from '../utils/isLocalhostDev';
 
 export type DevAccountState = 'guest' | 'user' | 'premium';
-export type DevShortcutId = 'onboarding' | 'tiktok' | 'auth' | 'paywall' | 'lernplan';
+export type DevShortcutId = 'onboarding' | 'tiktok' | 'auth' | 'paywall' | 'lernplan' | 'oralExamLive';
 export type DevTransitionState = 'none' | 'active_7_days' | 'active_2_days' | 'active_last_day' | 'expired';
 
 type ShortcutRequest = {
@@ -27,6 +27,8 @@ interface DevPanelContextType {
   setTransitionState: (state: DevTransitionState) => void;
   transitionNoticeReplayNonce: number;
   replayTransitionNotice: () => void;
+  showExplanationImages: boolean;
+  setShowExplanationImages: (show: boolean) => void;
 }
 
 const DevPanelContext = createContext<DevPanelContextType | undefined>(undefined);
@@ -55,6 +57,9 @@ export function DevPanelProvider({ children }: { children: ReactNode }) {
   const [shortcutRequest, setShortcutRequest] = useState<ShortcutRequest | null>(null);
   const [transitionState, setTransitionState] = useState<DevTransitionState>('none');
   const [transitionNoticeReplayNonce, setTransitionNoticeReplayNonce] = useState(0);
+  const [showExplanationImages, setShowExplanationImagesInternal] = useState(() => {
+    return localStorage.getItem('34a_show_explanation_images') !== 'false';
+  });
 
   const setOverrideState = (state: DevAccountState) => {
     setOverrideStateInternal(state);
@@ -74,6 +79,11 @@ export function DevPanelProvider({ children }: { children: ReactNode }) {
 
   const replayTransitionNotice = () => {
     setTransitionNoticeReplayNonce((nonce) => nonce + 1);
+  };
+
+  const setShowExplanationImages = (show: boolean) => {
+    setShowExplanationImagesInternal(show);
+    localStorage.setItem('34a_show_explanation_images', show ? 'true' : 'false');
   };
 
   const simulatedUser = useMemo(() => {
@@ -101,8 +111,19 @@ export function DevPanelProvider({ children }: { children: ReactNode }) {
       setTransitionState,
       transitionNoticeReplayNonce,
       replayTransitionNotice,
+      showExplanationImages,
+      setShowExplanationImages,
     }),
-    [enabled, overrideState, panelOpen, shortcutRequest, simulatedUser, transitionState, transitionNoticeReplayNonce],
+    [
+      enabled,
+      overrideState,
+      panelOpen,
+      shortcutRequest,
+      simulatedUser,
+      transitionState,
+      transitionNoticeReplayNonce,
+      showExplanationImages,
+    ],
   );
 
   return <DevPanelContext.Provider value={value}>{children}</DevPanelContext.Provider>;
