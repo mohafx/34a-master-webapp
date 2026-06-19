@@ -53,7 +53,7 @@ export class OralExamPaywallError extends Error {
  */
 export async function startOralExamSession(
     focusTopic?: string | null,
-    requestedMode?: 'free_test_3q' | 'full_5min' | null
+    requestedMode?: 'free_test_3q' | 'full_simulation' | null
 ): Promise<OralExamStartResponse> {
     const { data, error } = await supabase.functions.invoke('oral-exam-session', {
         body: {

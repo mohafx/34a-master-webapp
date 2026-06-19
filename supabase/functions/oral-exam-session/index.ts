@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 // Startet eine mündliche Prüfungssimulation:
 //  1. Auth prüfen (nur eingeloggte Nutzer)
-//  2. Premium serverseitig ermitteln (autoritativ — schützt den teuren full_5min-Modus)
+//  2. Premium serverseitig ermitteln (autoritativ — schützt den teuren full_simulation-Modus)
 //  3. Free-Nutzer: genau 1 abgeschlossener Gratis-Test erlaubt, sonst paywallRequired
 //  4. Session-Zeile anlegen (status=running)
 //  5. ElevenLabs Signed URL holen (API-Key bleibt geheim)
@@ -23,9 +23,10 @@ function isAdminEmail(email?: string | null): boolean {
     return !!email && ADMIN_EMAILS.includes(email.trim().toLowerCase());
 }
 
-// Dauer-Limits (Sekunden) je Modus — Client-Timer + ElevenLabs-Agent-Maxdauer sind die echten Kosten-Backstops.
+// Dauer-Limits (Sekunden) je Modus — fachlich begrenzt der Agent über Fälle/Rückfragen.
+// Die Zeit ist nur ein technischer Kosten-Backstop.
 const MAX_DURATION_FREE = 180;
-const MAX_DURATION_FULL = 300;
+const MAX_DURATION_FULL = 720;
 
 const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_URL") ?? "",
@@ -133,10 +134,10 @@ serve(async (req) => {
 
         const body = await req.json().catch(() => ({}));
         const focusTopic: string | null = body?.focus_topic ?? null;
-        // Admin-Test: erlaubt explizite Modus-Wahl (free_test_3q | full_5min), um beide Abläufe zu testen.
+        // Admin-Test: erlaubt explizite Modus-Wahl (free_test_3q | full_simulation), um beide Abläufe zu testen.
         const requestedMode: string | null =
-            body?.requested_mode === "free_test_3q" || body?.requested_mode === "full_5min"
-                ? body.requested_mode
+            body?.requested_mode === "free_test_3q" || body?.requested_mode === "full_simulation" || body?.requested_mode === "full_5min"
+                ? body.requested_mode === "full_5min" ? "full_simulation" : body.requested_mode
                 : null;
 
         const admin = isAdminEmail(user.email);
@@ -160,8 +161,8 @@ serve(async (req) => {
         }
 
         // Admin darf den Modus explizit wählen; sonst ergibt er sich aus dem Premium-Status.
-        const mode = admin && requestedMode ? requestedMode : premium ? "full_5min" : "free_test_3q";
-        const maxDurationSec = mode === "full_5min" ? MAX_DURATION_FULL : MAX_DURATION_FREE;
+        const mode = admin && requestedMode ? requestedMode : premium ? "full_simulation" : "free_test_3q";
+        const maxDurationSec = mode === "full_simulation" ? MAX_DURATION_FULL : MAX_DURATION_FREE;
 
         // Session anlegen
         const { data: session, error: insertError } = await supabaseAdmin

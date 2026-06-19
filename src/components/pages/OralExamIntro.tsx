@@ -9,7 +9,7 @@ import {
     OralExamPaywallError,
 } from '../../services/oralExam';
 
-type TestMode = 'free_test_3q' | 'full_5min';
+type TestMode = 'free_test_3q' | 'full_simulation';
 
 export default function OralExamIntro() {
     const navigate = useNavigate();
@@ -18,7 +18,7 @@ export default function OralExamIntro() {
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [selectedMode, setSelectedMode] = useState<TestMode>('full_5min');
+    const [selectedMode, setSelectedMode] = useState<TestMode>('full_simulation');
 
     const handleStart = async () => {
         setLoading(true);
@@ -107,12 +107,12 @@ export default function OralExamIntro() {
                         meta="max. 3 Min"
                     />
                     <ModeCard
-                        active={selectedMode === 'full_5min'}
-                        onClick={() => setSelectedMode('full_5min')}
+                        active={selectedMode === 'full_simulation'}
+                        onClick={() => setSelectedMode('full_simulation')}
                         icon={<Crown size={20} strokeWidth={2.5} />}
                         title="Premium"
                         subtitle="Voll · mehrere Themen"
-                        meta="max. 5 Min"
+                        meta="8-12 Min"
                     />
                 </div>
             </div>

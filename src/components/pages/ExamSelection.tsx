@@ -109,7 +109,7 @@ export default function ExamSelection() {
                                     Sprachgesteuert
                                 </span>
                                 <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
-                                    ~5 Min
+                                    8-12 Min
                                 </span>
                             </div>
                         </div>

@@ -51,6 +51,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const [transcript, setTranscript] = useState<OralExamTranscriptTurn[]>([]);
     const [remaining, setRemaining] = useState(state.maxDurationSec);
     const [inputLevel, setInputLevel] = useState(0);
+    const [evaluationProgress, setEvaluationProgress] = useState(0);
 
     const conversationIdRef = useRef<string | undefined>(undefined);
     const transcriptRef = useRef<OralExamTranscriptTurn[]>([]);
@@ -64,6 +65,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const finish = useCallback(async () => {
         if (finishingRef.current) return;
         finishingRef.current = true;
+        setEvaluationProgress(8);
         setPhase('evaluating');
 
         try {
@@ -83,6 +85,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                 durationS,
                 conversationIdRef.current
             );
+            setEvaluationProgress(100);
             navigate(`/oral-exam/results/${state.sessionId}`, {
                 replace: true,
                 state: { result, mode: state.mode },
@@ -94,6 +97,7 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
                 : raw || 'Auswertung fehlgeschlagen.';
             setErrorMsg(friendly);
             setPhase('error');
+            setEvaluationProgress(0);
             finishingRef.current = false;
         }
     }, [conversation, navigate, remaining, state.maxDurationSec, state.mode, state.sessionId]);
@@ -138,6 +142,19 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         const t = setTimeout(() => setRemaining((r) => r - 1), 1000);
         return () => clearTimeout(t);
     }, [phase, remaining, finish]);
+
+    // Fortschritt während der Auswertung. Die echten Schritte passieren serverseitig
+    // ohne Streaming; deshalb steigt der Wert bis 95 % und springt erst bei Erfolg auf 100 %.
+    useEffect(() => {
+        if (phase !== 'evaluating') return;
+        const startedAt = Date.now();
+        const timer = window.setInterval(() => {
+            const elapsed = Date.now() - startedAt;
+            const next = Math.min(95, 8 + Math.round((elapsed / 45000) * 87));
+            setEvaluationProgress((current) => Math.max(current, next));
+        }, 600);
+        return () => window.clearInterval(timer);
+    }, [phase]);
 
     // Mikrofon-Pegel des Nutzers pollen → treibt die "Du sprichst"-Animation.
     useEffect(() => {
@@ -196,7 +213,25 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             <div className="max-w-2xl mx-auto px-4 py-20 text-center">
                 <Loader2 size={40} className="animate-spin text-violet-600 mx-auto mb-6" />
                 <h1 className="font-black text-xl text-slate-900 dark:text-white mb-2">Auswertung läuft…</h1>
-                <p className="text-slate-500 dark:text-slate-400 text-sm">Dein Gespräch wird von der KI bewertet und die Aufnahme gespeichert. Das dauert einen Moment.</p>
+                <div className="w-full max-w-sm mx-auto mt-5 mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-black uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Fortschritt
+                        </span>
+                        <span className="text-sm font-black tabular-nums text-violet-600 dark:text-violet-300">
+                            {evaluationProgress} %
+                        </span>
+                    </div>
+                    <div className="h-3 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                        <div
+                            className="h-full rounded-full bg-violet-600 transition-all duration-500 ease-out"
+                            style={{ width: `${evaluationProgress}%` }}
+                        />
+                    </div>
+                </div>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">
+                    Dein Gespräch wird von der KI bewertet und die Aufnahme gespeichert. Bitte verlassen Sie diese Seite nicht.
+                </p>
             </div>
         );
     }

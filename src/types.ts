@@ -172,12 +172,12 @@ export const MINI_EXAM_TOPIC_DISTRIBUTION = {
 
 export type WrittenExamTopic = keyof typeof TOPIC_DISTRIBUTION;
 
-// ── Mündliche Prüfungssimulation (KI / ElevenLabs + Gemini) ──────────────────
+// ── Mündliche Prüfungssimulation (KI / ElevenLabs + OpenAI) ──────────────────
 // Spiegelt die Tabelle oral_exam_sessions und den Vertrag der Edge Functions
 // oral-exam-session / oral-exam-evaluation. Siehe
 // docs/produkt/ki-muendliche-pruefungssimulation-umsetzung.md
 
-export type OralExamMode = 'free_test_3q' | 'full_5min';
+export type OralExamMode = 'free_test_3q' | 'full_simulation' | 'full_5min';
 export type OralExamStatus = 'running' | 'done' | 'aborted' | 'evaluation_failed';
 
 export interface OralExamTranscriptTurn {

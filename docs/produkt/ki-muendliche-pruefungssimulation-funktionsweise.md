@@ -42,7 +42,7 @@ Zwei KI-Bausteine, klar getrennt:
    │  2. Verbindung zum Prüfer (ElevenLabs WebSocket)
    │  3. Gespräch: Prüfer stellt Fallbeispiel → Nutzer spricht → Prüfer fragt nach …
    │     - Live-Transkript läuft mit
-   │     - Countdown (Free 3 Min / Voll 5 Min)
+   │     - Countdown (Free 3 Min / Voll 8-12 Min als technischer Backstop)
    │     - "Prüfung beenden" jederzeit, oder Timeout, oder Prüfer beendet
    ▼  finish(): Session beenden → Transkript an Bewertung schicken
 /oral-exam/results/:sessionId
@@ -114,8 +114,8 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 **Ablauf serverseitig:**
 1. **Auth:** Nutzer aus JWT auflösen → kein Nutzer ⇒ `401 {error:"unauthorized"}`.
 2. **Admin-Gate (Soft-Launch):** Nur `m.almajzoub1@gmail.com` darf ⇒ sonst `403 {error:"feature_not_available"}`.
-3. **Premium/Modus:** Admin darf den Modus explizit wählen (`requested_mode` = `free_test_3q`/`full_5min`,
-   für Tests beider Abläufe); sonst Admin ⇒ `full_5min`. (Für späteren öffentlichen Launch: `isUserPremium()`
+3. **Premium/Modus:** Admin darf den Modus explizit wählen (`requested_mode` = `free_test_3q`/`full_simulation`,
+   für Tests beider Abläufe); sonst Admin ⇒ `full_simulation`. (Für späteren öffentlichen Launch: `isUserPremium()`
    prüft `subscriptions`, `user_profiles.is_premium`, aktive `access_grants`; `requested_mode` ist für
    Nicht-Admins wirkungslos.)
 4. **Free-Gating:** Nicht-Premium mit bereits 1 abgeschlossenem Gratis-Test ⇒ `200 {paywallRequired:true}`.
@@ -126,10 +126,10 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 ```json
 {
   "sessionId": "uuid",
-  "mode": "full_5min",            // | "free_test_3q"
-  "maxDurationSec": 300,          // 300 (voll) | 180 (free)
+  "mode": "full_simulation",            // | "free_test_3q"
+  "maxDurationSec": 720,          // 720 (voll) | 180 (free)
   "signedUrl": "wss://…",
-  "dynamicVariables": { "mode": "full_5min", "focus_topic": "alle", "candidate_name": "Max" }
+  "dynamicVariables": { "mode": "full_simulation", "focus_topic": "alle", "candidate_name": "Max" }
 }
 ```
 
@@ -137,19 +137,19 @@ Datei: [`supabase/functions/oral-exam-session/index.ts`](../../supabase/function
 | Modus | Dauer-Limit (Client-Timer) | Wer |
 |---|---|---|
 | `free_test_3q` | 180 s | eingeloggt, ohne Premium (1× gratis) |
-| `full_5min` | 300 s | Premium / Admin |
+| `full_simulation` | 720 s | Premium / Admin |
 
-> Echte Kosten-Backstops: Client-Timer **und** Max-Dauer des ElevenLabs-Agents (360 s).
+> Echte Kosten-Backstops: Client-Timer **und** Max-Dauer des ElevenLabs-Agents (720 s).
 
 ---
 
 ## 5. Die Sprach-KI — ElevenLabs Agent „Herr Müller"
 
 - **Conversational-AI-Agent** bei ElevenLabs (Voice rein/raus, Turn-Taking, Barge-in).
-- Sprache **Deutsch**, Modell `eleven_flash_v2_5` (niedrige Latenz), Max-Dauer 360 s als Kosten-Backstop.
+- Sprache **Deutsch**, Modell `eleven_flash_v2_5` (niedrige Latenz), Max-Dauer 720 s als Kosten-Backstop.
 - **`agent_id` ist KEIN Repo-Wert** — liegt als Supabase-Secret `ELEVENLABS_AGENT_ID`.
 - **Dynamic Variables** (vom Backend gesetzt, im Agent-Prompt nutzbar): `mode`, `focus_topic`,
-  `candidate_name` → erlauben Personalisierung & Modus-abhängiges Verhalten (3 Fragen vs. ~5 Min).
+  `candidate_name` → erlauben Personalisierung & Modus-abhängiges Verhalten (3 Fälle vs. volle Simulation).
 - **Rolle des Agents:** stellt praxisnahe Fallbeispiele, fragt dynamisch nach („Warum?", „Und wenn …?"),
   benotet **nicht laut** (Bewertung passiert separat in Schritt 3), beendet neutral.
 
@@ -240,7 +240,7 @@ Migration: [`supabase/migrations/20260616175910_create_oral_exam_sessions.sql`](
 |---|---|---|
 | `id` | uuid (PK, default `gen_random_uuid()`) | Session-ID |
 | `user_id` | uuid (FK → `auth.users`, NOT NULL) | Besitzer |
-| `mode` | text | `free_test_3q` \| `full_5min` |
+| `mode` | text | `free_test_3q` \| `full_simulation` |
 | `focus_topic` | text \| null | gewählter Schwerpunkt |
 | `status` | text (default `running`) | `running` \| `done` \| `aborted` \| `evaluation_failed` |
 | `started_at` | timestamptz (default `now()`) | Start |
@@ -268,7 +268,7 @@ Service-Role-Key und umgehen RLS bewusst.)
 
 | Nutzer | Heute (Admin-only Soft-Launch) |
 |---|---|
-| Admin (`m.almajzoub1@gmail.com`) | Karte sichtbar; voller Zugriff `full_5min`, unbegrenzt |
+| Admin (`m.almajzoub1@gmail.com`) | Karte sichtbar; voller Zugriff `full_simulation`, unbegrenzt |
 | Eingeloggt, kein Admin | Karte **unsichtbar**; `/oral-exam*` → Redirect; Backend `403 feature_not_available` |
 | Ausgeloggt | wie oben (kein Zugriff) |
 
@@ -277,7 +277,7 @@ Das Gating ist an **drei Stellen** verankert (alle drei müssen für den öffent
 2. **Routen:** `<AdminGuard>` um `/oral-exam*` in [`App.tsx`](../../src/App.tsx)
 3. **Backend:** `ADMIN_EMAILS`-Check in `oral-exam-session`
 
-Die Logik für den **öffentlichen** Betrieb (1 Gratis-Test → Paywall, Premium = `full_5min`) ist bereits
+Die Logik für den **öffentlichen** Betrieb (1 Gratis-Test → Paywall, Premium = `full_simulation`) ist bereits
 eingebaut und greift automatisch, sobald das Admin-Gate entfernt wird.
 
 ---

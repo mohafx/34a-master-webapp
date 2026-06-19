@@ -16,6 +16,7 @@ function formatDate(iso: string): string {
 
 const MODE_LABEL: Record<string, string> = {
     free_test_3q: 'Gratis-Test',
+    full_simulation: 'Volle Simulation',
     full_5min: 'Volle Simulation',
 };
 

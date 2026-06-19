@@ -28,7 +28,7 @@ last_verified: 2026-06-18
 | Merkmal | Realität | Konsequenz für die Sim |
 |---|---|---|
 | Zulassung | Nur nach bestandener schriftlicher (≥50 %) | „Stufe 2" nach schriftlichem Training |
-| Format | Gruppe bis 5, **~15 Min/Person** | Zeitgefühl & 15-Min-Modus |
+| Format | Gruppe bis 5, **~15 Min/Person** | Zeitgefühl & 8-12-Minuten-Vollsimulation |
 | Bestehensgrenze | **≥50 %** | Transparentes Scoring, Pass/Fail sichtbar |
 | Schwerpunkt | **Praxis-Fallbeispiele** | Szenario-getrieben, nicht Faktenabfrage |
 | Kern-Themen | **Umgang mit Menschen**, Gefahrensituationen, **Deeskalation**, interkulturelle Kompetenz | priorisieren |

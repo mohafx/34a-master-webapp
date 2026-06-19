@@ -7,7 +7,7 @@
 CREATE TABLE IF NOT EXISTS public.oral_exam_sessions (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id            uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    mode               text NOT NULL,                 -- 'free_test_3q' | 'full_5min'
+    mode               text NOT NULL,                 -- 'free_test_3q' | 'full_simulation'
     focus_topic        text,
     status             text NOT NULL DEFAULT 'running',-- 'running' | 'done' | 'aborted'
     started_at         timestamptz NOT NULL DEFAULT now(),

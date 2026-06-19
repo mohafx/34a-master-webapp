@@ -26,7 +26,7 @@ Code liegt in `supabase/functions/_shared/`.
 | `question-explanation-pipeline` | Erklärungen zu Fragen generieren | `GOOGLE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `written-exam-regeneration-pipeline` | Schriftliche-Prüfung-Fragen regenerieren | `GOOGLE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `oral-exam-session` | Mündliche Prüfung starten: Auth + Admin-Gate (Soft-Launch) + Modus/Premium + Session anlegen + ElevenLabs Signed URL holen | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `SUPABASE_SERVICE_ROLE_KEY` |
-| `oral-exam-evaluation` | Transkript (ElevenLabs, mit Client-Fallback) per Gemini bewerten + Ergebnis speichern (idempotent) | `GOOGLE_AI_API_KEY`, `ELEVENLABS_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+| `oral-exam-evaluation` | Transkript (ElevenLabs, mit Client-Fallback) per OpenAI bewerten + Ergebnis speichern (idempotent) | `OPENAI_API_KEY`, `OPENAI_MODEL`, `ELEVENLABS_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `_shared/` | Geteilter Code: `checkout-finalization.ts`, `posthog.ts` | — |
 
 > ⚠️ In diesem Supabase-Projekt liegt außerdem eine **fremde, verwaiste** Function

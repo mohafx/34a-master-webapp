@@ -98,26 +98,26 @@ Browser (React 19 SPA)
 ### 4a. Ein Agent, kein zweiter (Architekturentscheidung 2026-06-18)
 **Bewusst genau EIN Agent** statt getrennter Agenten für Abonnenten/Nicht-Abonnenten. Begründung:
 der einzige Verhaltensunterschied ist der Schlusssatz — das löst die bereits übergebene
-Dynamic-Variable `{{mode}}` (`free_test_3q` vs. `full_5min`) im System-Prompt. Zwei Agenten würden
+Dynamic-Variable `{{mode}}` (`free_test_3q` vs. `full_simulation`) im System-Prompt. Zwei Agenten würden
 jede künftige Prompt-/Persona-Verbesserung verdoppeln (Drift-Gefahr) und eine zweite `agent_id`
 erfordern. Erst splitten, falls die Modi inhaltlich stark auseinanderlaufen (anderer
 Schwierigkeitsgrad/Themen-Tiefe).
 
 ### 4b. Modus-abhängiger Abschluss (im ElevenLabs-Prompt, per API gesetzt 2026-06-18)
 Die `ENDE`-Sektion des System-Prompts verzweigt nach `{{mode}}`:
-- `full_5min`: neutraler Abschluss („…Prüfung ist hiermit beendet. Ihre Auswertung folgt gleich.").
+- `full_simulation`: neutraler Abschluss („…Prüfung ist hiermit beendet. Ihre Auswertung folgt gleich.").
 - `free_test_3q`: zusätzlich ein **seriöser Premium-Hinweis** des Prüfers — die Mini-Simulation sei
   nur ein verkürzter Eindruck; die vollständige Simulation (volle Länge, mehrere Fallbeispiele, tiefe
   Rückfragen) sei Teil von **34a Master Premium**. Keine Bewertung/Note.
 - Der Prompt liegt **nur bei ElevenLabs** (nicht im Repo). Änderungen via
   `PATCH /v1/convai/agents/{agent_id}` mit `conversation_config.agent.prompt.prompt` und dem
   `xi-api-key` (= Secret `ELEVENLABS_API_KEY`, nie committen).
-- Im aktuellen Admin-Soft-Launch ist `mode` immer `full_5min` → der Premium-Hinweis greift erst nach
+- Im aktuellen Admin-Soft-Launch ist `mode` immer `full_simulation` → der Premium-Hinweis greift erst nach
   dem öffentlichen Launch für Free-Nutzer.
 
 ## 4c. Admin-Modus-Auswahl (Test, 2026-06-18)
 Im Admin-Soft-Launch kann der Admin vor dem Start in `OralExamIntro` den Test-Modus wählen
-(**Free** = `free_test_3q` / **Premium** = `full_5min`), um beide Abläufe inkl. des modus-abhängigen
+(**Free** = `free_test_3q` / **Premium** = `full_simulation`), um beide Abläufe inkl. des modus-abhängigen
 Prüfer-Abschlusses zu testen. Mechanik:
 - `startOralExamSession(focusTopic, requestedMode)` schickt `requested_mode` im Body.
 - `oral-exam-session` (v4) honoriert `requested_mode` **nur für Admins**; für alle anderen ergibt sich
@@ -154,11 +154,13 @@ model_answers[{scenario,musterantwort}], roter_faden[], next_step }`. Bestehensg
   `duration_s`, `transcript` und `feedback.error`/`feedback.retryable=true` gespeichert.
 - `OralExamResults` zeigt für `evaluation_failed` einen Fehlerzustand mit „Auswertung erneut versuchen“.
   Der Retry nutzt das gespeicherte Transkript und ruft dieselbe idempotente Edge Function erneut auf.
+  (Behoben am 2026-06-19: Ein State-Sync-Problem bei gleichem Pfad gelöst, sodass nach erfolgreichem Retry das Ergebnis sofort gerendert wird).
 - Alte Fehlversuche aus der Gemini-Key-Störung haben teils kein gespeichertes Transkript und keine
   `conversationId`; einige wurden durch den Client-Cleanup bereits als `aborted` markiert. Sie sind im
   Verlauf sichtbar, können aber nur über „Neue Prüfung starten“ wiederholt werden.
 - `WrittenExamHistory` („Abgeschlossene Prüfungen“) zeigt mündliche `done`, `evaluation_failed`, `running`
-  und `aborted`-Sessions an, damit Auswertungsfehler nicht verschwinden.
+  und `aborted`-Sessions an, damit Auswertungsfehler nicht verschwinden. (Aktualisiert am 2026-06-19:
+  Statistikkarten für Schriftlich/Mündlich wurden aus dem Header entfernt und als exklusive Filter-Buttons darunter implementiert).
 
 ## 6b. Audio-Speicherung (serverseitig, 2026-06-18)
 - Nach der Auswertung holt `oral-exam-evaluation` das **vollständige Gesprächs-Audio** (Prüfer + Prüfling)
