@@ -82,7 +82,11 @@ export type AnalyticsEventName =
     | 'written_exam_completed'
     | 'mini_exam_started'
     | 'mini_exam_completed'
+    | 'oral_exam_intro_viewed'
     | 'oral_exam_started'
+    | 'oral_exam_connected'
+    | 'oral_exam_aborted'
+    | 'oral_exam_error'
     | 'oral_exam_completed'
     // Premium Events
     | 'paywall_shown'

@@ -133,6 +133,13 @@ export default function OralExamIntro() {
     }, [user?.isLoggedIn]);
 
     useEffect(() => {
+        trackEvent('oral_exam_intro_viewed', {
+            logged_in: Boolean(user?.isLoggedIn),
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
         const params = new URLSearchParams(location.search);
         if (params.get('devStart') !== '1' || devAutoStartRef.current) return;
         devAutoStartRef.current = true;

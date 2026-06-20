@@ -4,6 +4,7 @@ import { ConversationProvider, useConversation } from '@elevenlabs/react';
 import { Mic, MicOff, Loader2, PhoneOff, AlertTriangle, Volume2 } from 'lucide-react';
 import { evaluateOralExam, abortOralExamSession, confirmOralExamSession } from '../../services/oralExam';
 import type { OralExamTranscriptTurn } from '../../types';
+import { usePostHog } from '../../contexts/PostHogProvider';
 
 // Module-level lock to prevent duplicate startSession calls during React StrictMode remounts
 let globalActiveSessionId: string | null = null;
@@ -50,6 +51,7 @@ const MOCK_TRANSCRIPT: OralExamTranscriptTurn[] = [
 function OralExamLiveInner({ state }: { state: LiveState }) {
     const navigate = useNavigate();
     const isMock = state.mock === true;
+    const { trackEvent } = usePostHog();
     const conversation = useConversation({
         onConnect: ({ conversationId }) => {
             conversationIdRef.current = conversationId;
@@ -57,6 +59,10 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
             void (async () => {
                 if (!isMock) await confirmOralExamSession(state.sessionId);
                 setPhase('live');
+                trackEvent('oral_exam_connected', {
+                    mode: state.mode,
+                    session_id: state.sessionId,
+                });
             })();
         },
         onDisconnect: () => {
@@ -78,6 +84,11 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
         onError: (message) => {
             setErrorMsg(message || 'Verbindungsfehler.');
             setPhase('error');
+            trackEvent('oral_exam_error', {
+                mode: state.mode,
+                session_id: state.sessionId,
+                error_message: message || 'Verbindungsfehler',
+            });
         },
     });
 
@@ -203,16 +214,23 @@ function OralExamLiveInner({ state }: { state: LiveState }) {
     const abortAndLeave = useCallback(async () => {
         if (finishingRef.current) return;
         finishingRef.current = true;
-        
+
+        trackEvent('oral_exam_aborted', {
+            mode: state.mode,
+            session_id: state.sessionId,
+            remaining_sec: remaining,
+            elapsed_sec: state.maxDurationSec - remaining,
+        });
+
         try { conversation.endSession(); } catch (_) { /* noop */ }
-        
+
         if (!isMock) {
             await abortOralExamSession(state.sessionId);
         }
-        
+
         globalActiveSessionId = null;
         navigate('/oral-exam', { replace: true });
-    }, [conversation, isMock, navigate, state.sessionId]);
+    }, [conversation, isMock, navigate, remaining, state.maxDurationSec, state.mode, state.sessionId, trackEvent]);
 
     // Start: Mikro-Permission holen, dann ElevenLabs-Session aufbauen (einmalig).
     useEffect(() => {
