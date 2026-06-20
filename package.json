@@ -20,6 +20,7 @@
     "pilot:question-images": "ts-node --esm scripts/run-question-explanation-images.ts",
     "pilot:lesson-images": "ts-node --esm scripts/run-lesson-image-pilot.ts",
     "pilot:written-regen": "ts-node --esm scripts/run-written-regeneration.ts",
+    "campaign:send-oral-exam": "ts-node --esm scripts/send-oral-exam-campaign.ts",
     "transition:dry-run": "node scripts/transition-access.mjs dry-run",
     "transition:apply": "node scripts/transition-access.mjs apply",
     "transition:status": "node scripts/transition-access.mjs status",
