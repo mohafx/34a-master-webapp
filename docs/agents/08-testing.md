@@ -1,7 +1,7 @@
 ---
 title: Testing
 scope: vitest-Setup, vorhandene Tests, Befehle
-last_verified: 2026-06-15
+last_verified: 2026-06-20
 ---
 
 # Testing
@@ -39,6 +39,20 @@ Für Ad-hoc-Läufe direkt: `npx vitest run <pfad>` oder `npx vitest` (Watch).
 
 > Hinweis: Es gibt **keinen** generischen `npm test`-Alias — gezielt die `test:*`-Befehle oder
 > `npx vitest` nutzen. Tests/Artefakte in `testsprite_tests/` ignorieren (kein aktiver Code).
+
+## Typecheck-Hinweis
+
+`npx tsc --noEmit` läuft aktuell repo-weit nicht sauber durch, weil Skripte und Supabase-Edge-
+Functions mit Node-TypeScript geprüft werden und dadurch bekannte Altfehler melden (u. a. Deno-
+Imports, Supabase-Generics und Pipeline-Skripttypen). Bei kleinen Frontend-Stabilitätsfixes zusätzlich
+zum Build gezielt prüfen:
+
+```bash
+npx tsc --noEmit --pretty false 2>&1 | rg 'src/(App\.tsx|components/ErrorBoundary\.tsx|components/pages/Statistics\.tsx)'
+npm run build
+```
+
+Für berührte Featurebereiche weiterhin die passenden Vitest-Skripte ausführen.
 
 ## Verwandt
 

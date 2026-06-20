@@ -781,6 +781,37 @@ function AppContent() {
     await setLessonCompletion(lessonId, !(progress.completedLessons[lessonId] === true));
   };
 
+  const appContextValue: AppContextType = {
+    user,
+    settings,
+    updateSettings,
+    language,
+    progress,
+    toggleLanguage,
+    logout,
+    answerQuestion,
+    answerFlashcard,
+    toggleBookmark,
+    toggleLessonCompletion,
+    setLessonCompletion,
+    showLanguageToggle: settings.showLanguageToggle ?? true,
+    setShowLanguageToggle: (show: boolean) => updateSettings({ showLanguageToggle: show }),
+    hideBottomNav,
+    setHideBottomNav,
+    showAuthDialog,
+    showPaywallDialog,
+    showFirstTimeOnboarding,
+    isPremium,
+    isSubscriptionLoading: subscriptionLoading,
+    openPaywall,
+    openOnboarding,
+    openAuthDialog: (mode = 'register', message) => {
+      setAuthDialogMode(mode);
+      setAuthDialogMessage(message || null);
+      setShowAuthDialog(true);
+    },
+  };
+
   // Show splash screen while auth or data is loading
   const [showSlowLoadingMessage, setShowSlowLoadingMessage] = useState(false);
   const { error: dataError } = useDataCache();
@@ -818,20 +849,26 @@ function AppContent() {
 
     if (dataError) {
       return (
-        <SplashScreen
-          showSlowLoadingMessage={!!dataError}
-          onRetry={() => {
-            // Force full reload if there was a data error (clear cache to be safe)
-            window.location.reload();
-          }}
-          detailMessage={getLoadingStatus()}
-          statusMessage={statusMessage}
-        />
+        <AppContext.Provider value={appContextValue}>
+          <SplashScreen
+            showSlowLoadingMessage={!!dataError}
+            onRetry={() => {
+              // Force full reload if there was a data error (clear cache to be safe)
+              window.location.reload();
+            }}
+            detailMessage={getLoadingStatus()}
+            statusMessage={statusMessage}
+          />
+        </AppContext.Provider>
       );
     }
 
     // For normal loading, show Skeleton instead of Splash Screen
-    return <DashboardSkeleton />;
+    return (
+      <AppContext.Provider value={appContextValue}>
+        <DashboardSkeleton />
+      </AppContext.Provider>
+    );
   }
 
   // Show first-time onboarding BEFORE anything else — but NEVER on auth-flow
@@ -841,70 +878,65 @@ function AppContent() {
   // user unable to set their new password.
   if (showFirstTimeOnboarding && !isAuthFlowRoute()) {
     return (
-      <FirstTimeOnboarding
-        userName={user?.name || 'Gast'}
-        onComplete={async (data) => {
-          // Handle Exam Date
-          if (data.examDate) {
-            setEffectiveExamDate(data.examDate);
-            if (authUser) {
-              try {
-                await db.updateExamDate(authUser.id, data.examDate);
-              } catch (error) {
-                console.error('Error saving exam date:', error);
+      <AppContext.Provider value={appContextValue}>
+        <FirstTimeOnboarding
+          userName={user?.name || 'Gast'}
+          onComplete={async (data) => {
+            // Handle Exam Date
+            if (data.examDate) {
+              setEffectiveExamDate(data.examDate);
+              if (authUser) {
+                try {
+                  await db.updateExamDate(authUser.id, data.examDate);
+                } catch (error) {
+                  console.error('Error saving exam date:', error);
+                }
               }
             }
-          }
 
-          // Handle Language
-          if (data.language) {
-            setLanguage(data.language === 'DE_AR' ? AppLanguage.DE_AR : AppLanguage.DE);
-            setEffectiveLanguage(data.language === 'DE_AR' ? AppLanguage.DE_AR : AppLanguage.DE);
-          }
-
-          // Handle Newsletter
-          if (data.newsletter && authUser?.email) {
-            try {
-              await db.addToWaitlist(authUser.email);
-            } catch (err) {
-              console.error('Error adding to newsletter:', err);
+            // Handle Language
+            if (data.language) {
+              setLanguage(data.language === 'DE_AR' ? AppLanguage.DE_AR : AppLanguage.DE);
+              setEffectiveLanguage(data.language === 'DE_AR' ? AppLanguage.DE_AR : AppLanguage.DE);
             }
-          }
 
-          // Mark onboarding completed — lokal (Fast-Path) UND serverseitig (geräteübergreifend).
-          if (authUser) {
-            markOnboardingCompleted(authUser.id);
-            db.markOnboardingCompleted(authUser.id).catch(err =>
-              console.error('Error persisting onboarding flag:', err)
-            );
-          }
+            // Handle Newsletter
+            if (data.newsletter && authUser?.email) {
+              try {
+                await db.addToWaitlist(authUser.email);
+              } catch (err) {
+                console.error('Error adding to newsletter:', err);
+              }
+            }
 
-          // Track onboarding completion
-          trackEvent('onboarding_completed', {
-            has_exam_date: !!data.examDate,
-            language: data.language,
-            newsletter_opted_in: data.newsletter,
-            days_until_exam: data.examDate
-              ? Math.ceil((new Date(data.examDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-              : null,
-          });
+            // Mark onboarding completed — lokal (Fast-Path) UND serverseitig (geräteübergreifend).
+            if (authUser) {
+              markOnboardingCompleted(authUser.id);
+              db.markOnboardingCompleted(authUser.id).catch(err =>
+                console.error('Error persisting onboarding flag:', err)
+              );
+            }
 
-          setShowFirstTimeOnboarding(false);
-        }}
-      />
+            // Track onboarding completion
+            trackEvent('onboarding_completed', {
+              has_exam_date: !!data.examDate,
+              language: data.language,
+              newsletter_opted_in: data.newsletter,
+              days_until_exam: data.examDate
+                ? Math.ceil((new Date(data.examDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                : null,
+            });
+
+            setShowFirstTimeOnboarding(false);
+          }}
+        />
+      </AppContext.Provider>
     );
   }
 
   return (
     <ErrorBoundary>
-    <AppContext.Provider value={{
-        user, settings, updateSettings, language, progress, toggleLanguage, logout, answerQuestion, answerFlashcard, toggleBookmark, toggleLessonCompletion, setLessonCompletion, showLanguageToggle: settings.showLanguageToggle ?? true, setShowLanguageToggle: (show: boolean) => updateSettings({ showLanguageToggle: show }), hideBottomNav, setHideBottomNav, showAuthDialog, showPaywallDialog, showFirstTimeOnboarding, isPremium, isSubscriptionLoading: subscriptionLoading, openPaywall, openOnboarding,
-        openAuthDialog: (mode = 'register', message) => {
-          setAuthDialogMode(mode);
-          setAuthDialogMessage(message || null);
-          setShowAuthDialog(true);
-        }
-      }}>
+      <AppContext.Provider value={appContextValue}>
         <HashRouter>
           <ScrollToTop />
           <div className="min-h-screen bg-[#F2F4F6] dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans transition-colors duration-300">

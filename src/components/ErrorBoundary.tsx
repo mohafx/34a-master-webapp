@@ -13,6 +13,30 @@ interface State {
   isChunkError: boolean;
 }
 
+const CHUNK_RELOAD_STORAGE_KEY = '34a_chunk_reload_attempt';
+
+function getErrorMessage(error: Error): string {
+  return `${error.name || ''} ${error.message || ''}`.trim();
+}
+
+function isChunkLoadError(error: Error): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return (
+    error.name === 'ChunkLoadError' ||
+    message.includes('failed to fetch dynamically imported module') ||
+    message.includes('error loading dynamically imported module') ||
+    message.includes('importing a module script failed') ||
+    message.includes('imported module') ||
+    (message.includes('text/html') && message.includes('javascript mime type')) ||
+    (message.includes('load failed') && message.includes('/assets/'))
+  );
+}
+
+function getChunkReloadSignature(error: Error): string {
+  return getErrorMessage(error).slice(0, 500);
+}
+
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -24,10 +48,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): State {
-    const isChunkError =
-      error.name === 'ChunkLoadError' ||
-      error.message.includes('Failed to fetch dynamically imported module') ||
-      error.message.includes('importing');
+    const isChunkError = isChunkLoadError(error);
 
     return {
       hasError: true,
@@ -38,6 +59,20 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('Error caught by ErrorBoundary:', error, errorInfo);
+
+    if (isChunkLoadError(error)) {
+      const signature = getChunkReloadSignature(error);
+      try {
+        const lastAttempt = window.sessionStorage.getItem(CHUNK_RELOAD_STORAGE_KEY);
+        if (lastAttempt !== signature) {
+          window.sessionStorage.setItem(CHUNK_RELOAD_STORAGE_KEY, signature);
+          window.location.reload();
+          return;
+        }
+      } catch (storageError) {
+        console.warn('Chunk reload guard unavailable:', storageError);
+      }
+    }
 
     // Fehler an Sentry senden
     Sentry.captureException(error, {

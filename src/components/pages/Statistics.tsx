@@ -8,6 +8,7 @@ import { db } from '../../services/database';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
 import { getCompletedLessonCountForModule } from '../../services/lessonFlow';
+import { supabase } from '../../lib/supabase';
 
 // Type for daily activity data
 interface DailyActivity {

@@ -58,3 +58,17 @@ Exam-Auswahl-Modal. Bei jedem neuen Modal innerhalb eines `transform`-Elternelem
 `navigate('/exam')` in Intro-Seiten führt immer zur Prüfungsauswahl, egal woher der Nutzer kam.
 Alle Zurück-Buttons in `MiniExamIntro`, `ExamIntro` und `OralExamIntro` nutzen `navigate(-1)`.
 Bei neuen Intro-/Interstitial-Seiten dasselbe Muster verwenden.
+
+## 11. Sentry: Chunk-/MIME-Fehler nicht blind als Codebug behandeln
+Sentry-Issues wie `Failed to fetch dynamically imported module`, `Importing a module script failed`
+oder `'text/html' is not a valid JavaScript MIME type` entstehen meist nach Deployments, wenn ein
+alter Browser-Tab noch auf nicht mehr vorhandene Vite-Assets zeigt. `ErrorBoundary` erkennt diese
+Klasse und lädt die Seite pro Fehlersignatur genau einmal automatisch neu (`sessionStorage`-Guard);
+erst danach bleibt der normale Fehlerbildschirm sichtbar. Keine aggressiven Cache-/Service-Worker-
+Umbauten ohne Reproduktion.
+
+## 12. Provider-Fehler nur minimal entschärfen
+`useApp`, `useDataCache`, `useSubscription` und `useAuth` sollen echte Provider-Fehler weiterhin
+sichtbar machen. Aktueller Kompromiss: `AppContext.Provider` umfasst auch frühe Rückgaben in
+`AppContent` (Loading, Datenfehler, Onboarding). Keine stillen Default-Kontexte für Auth/Payment/Data
+einführen, weil das echte Zustandsfehler verstecken kann.
