@@ -22,21 +22,9 @@ import { QuizSettingsDialog } from './components/pages/QuizSettingsDialog';
 
 // Frequently used pages - loaded immediately
 import Dashboard from './components/pages/Dashboard';
-import ModuleList from './components/pages/ModuleList';
-import ModuleDetail from './components/pages/ModuleDetail';
-import QuestionView from './components/pages/QuestionView';
-import Profile from './components/pages/Profile';
-import PracticeSelection from './components/pages/PracticeSelection';
-import ModuleQuestionsList from './components/pages/ModuleQuestionsList';
-import ExamIntro from './components/pages/ExamIntro';
-import LeadCaptureScreen from './components/pages/LeadCaptureScreen';
 import EmailConfirmation from './components/pages/EmailConfirmation';
 import ResetPassword from './components/pages/ResetPassword';
 import AuthCallback from './components/pages/AuthCallback';
-import Impressum from './components/pages/Impressum';
-import Datenschutz from './components/pages/Datenschutz';
-import AGB from './components/pages/AGB';
-import Widerrufsbelehrung from './components/pages/Widerrufsbelehrung';
 import { AuthDialog } from './components/auth/AuthDialog';
 import { DashboardSkeleton } from './components/skeletons/DashboardSkeleton';
 import CookieConsent from './components/CookieConsent';
@@ -57,6 +45,17 @@ import {
 
 // Code-split large components - loaded on demand
 
+const ModuleList = lazy(() => import('./components/pages/ModuleList'));
+const ModuleDetail = lazy(() => import('./components/pages/ModuleDetail'));
+const QuestionView = lazy(() => import('./components/pages/QuestionView'));
+const Profile = lazy(() => import('./components/pages/Profile'));
+const PracticeSelection = lazy(() => import('./components/pages/PracticeSelection'));
+const ModuleQuestionsList = lazy(() => import('./components/pages/ModuleQuestionsList'));
+const ExamIntro = lazy(() => import('./components/pages/ExamIntro'));
+const Impressum = lazy(() => import('./components/pages/Impressum'));
+const Datenschutz = lazy(() => import('./components/pages/Datenschutz'));
+const AGB = lazy(() => import('./components/pages/AGB'));
+const Widerrufsbelehrung = lazy(() => import('./components/pages/Widerrufsbelehrung'));
 const WrittenExam = lazy(() => import('./components/pages/WrittenExam'));
 const MiniExam = lazy(() => import('./components/pages/MiniExam'));
 const MiniExamIntro = lazy(() => import('./components/pages/MiniExamIntro'));

@@ -43,12 +43,12 @@ Folgende Arbeitspakete sind für die kommenden Sprints geplant:
 *   **Ziel:** Die Paywall-UI überarbeiten, um die neuen KI-Features prominent zu bewerben und höhere Conversion-Rates zu erzielen.
 *   **Erledigt (2026-06-20):** `33df7e2` — Exam-Intros-Redesign, Modal-Portal-Fix, Paywall-Conversion-Optimierung. `29adec0` — Paywall- und Dashboard-Messaging verfeinert.
 
-### Task 5: Mündliche KI-Features launchen, per E-Mail vermarkten & SEO-Seiten bauen
+### Task 5: Mündliche KI-Features launchen, per E-Mail vermarkten & SEO-Seiten bauen ✅
 *   **Ziel:** Nutzerakquise und Reaktivierung bestehender Nutzer für das neue Feature.
-*   **Teilweise erledigt:**
+*   **Erledigt:**
     *   **Öffentlicher Launch ✅ (2026-06-20):** Mündliche Prüfung für alle Nutzer sichtbar (`c06097b`).
     *   **E-Mail-Kampagne ✅ (2026-06-20):** `7bb5d5f` — E-Mail-Kampagne für mündliche Prüfungssimulation mit Abmelde-System gebaut. `f059e97` — Daily Limits und Duplikat-Prävention. `2e4eca5` — Dokumentiert in `docs/agents/10-email-kampagnen.md`.
-    *   **SEO-Pages:** Noch ausstehend.
+    *   **SEO-Seiten ✅:** Seiten für die mündliche Prüfung sind gebaut und werden nicht mehr als offene Roadmap-Aufgabe geführt.
 
 ### Task 5b: UI-Optimierungen nach Launch
 *   **Ziel:** Conversion und Abschlussquote der mündlichen Prüfung verbessern.
