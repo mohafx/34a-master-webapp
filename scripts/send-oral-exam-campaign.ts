@@ -398,17 +398,18 @@ async function main() {
   }
 
   // Fetch profiles to check marketing subscription status and names
-  console.log('Fetching user profiles for marketing status...');
+  console.log('Fetching user profiles for marketing status and campaign tracking...');
   const { data: profiles, error: profilesError } = await supabase
     .from('user_profiles')
-    .select('id, display_name, unsubscribed_from_marketing');
+    .select('id, display_name, unsubscribed_from_marketing, oral_exam_campaign_sent');
 
   if (profilesError) {
-    console.warn('⚠️ Warning: Failed to fetch user profiles. Email personalization and unsubscribe checks might be incomplete. Error:', profilesError.message);
+    console.warn('⚠️ Warning: Failed to fetch user profiles. Email personalization, unsubscribe, and campaign tracking checks might be incomplete. Error:', profilesError.message);
   }
 
   const profileMap = new Map<string, string>();
   const unsubscribedSet = new Set<string>();
+  const campaignSentSet = new Set<string>();
   if (profiles) {
     profiles.forEach(p => {
       if (p.display_name && p.display_name.trim()) {
@@ -417,12 +418,19 @@ async function main() {
       if (p.unsubscribed_from_marketing) {
         unsubscribedSet.add(p.id);
       }
+      if (p.oral_exam_campaign_sent) {
+        campaignSentSet.add(p.id);
+      }
     });
   }
 
-  // Filter users who have emails and have NOT unsubscribed
-  const validUsers = allUsers.filter(u => u.email && !unsubscribedSet.has(u.id));
-  console.log(`Total valid users with email address: ${validUsers.length} (Filtered out: ${unsubscribedSet.size} unsubscribed users)`);
+  // Filter users who have emails, have NOT unsubscribed, and have NOT received the campaign email yet
+  const validUsers = allUsers.filter(u => u.email && !unsubscribedSet.has(u.id) && !campaignSentSet.has(u.id));
+  console.log(`Campaign statistics:`);
+  console.log(`  - Total users in database: ${allUsers.length}`);
+  console.log(`  - Unsubscribed from marketing: ${unsubscribedSet.size}`);
+  console.log(`  - Already received this campaign: ${campaignSentSet.size}`);
+  console.log(`  - Remaining eligible users: ${validUsers.length}`);
 
   let targetUsers = validUsers;
   if (limit !== null) {
@@ -483,6 +491,18 @@ async function main() {
         console.log(`${progress} Sending email to: ${user.email} ...`);
         await sendEmailViaResend(user.email, subject, html, fromEmail);
         successCount++;
+        
+        // Mark user as campaign sent in database
+        const { error: updateError } = await supabase
+          .from('user_profiles')
+          .update({ oral_exam_campaign_sent: true })
+          .eq('id', user.id);
+          
+        if (updateError) {
+          console.error(`⚠️ Failed to mark user ${user.email} as campaign sent in database:`, updateError.message);
+        } else {
+          console.log(`Marked user ${user.email} as sent in database.`);
+        }
         
         // Add artificial delay to avoid hitting Resend free limit (e.g. 10 reqs/sec = 100ms interval)
         // Free tier has 10/s. 150ms is very safe.
