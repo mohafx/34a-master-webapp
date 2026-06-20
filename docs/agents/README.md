@@ -21,6 +21,7 @@ Disclosure). Jede Datei hat YAML-Frontmatter (`title`, `scope`, `last_verified`)
 | 07 | [07-konventionen.md](07-konventionen.md) | Code schreiben, der zum Projekt passt |
 | 08 | [08-testing.md](08-testing.md) | Tests schreiben/ausführen |
 | 09 | [09-stolperfallen.md](09-stolperfallen.md) | **Immer überfliegen** — bekannte Fallen |
+| 10 | [10-email-kampagnen.md](10-email-kampagnen.md) | E-Mail-Kampagnen, Resend & Opt-Out-Logik |
 
 ## Pflege
 

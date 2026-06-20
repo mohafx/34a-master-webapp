@@ -89,6 +89,7 @@ Benötigte **Namen** (Werte aus dem lokalen Secret-Store):
 | [07-konventionen.md](docs/agents/07-konventionen.md) | Code-Stil, Muster, Naming, Sprache, Commits |
 | [08-testing.md](docs/agents/08-testing.md) | vitest-Setup, vorhandene Tests |
 | [09-stolperfallen.md](docs/agents/09-stolperfallen.md) | Gesammelte Gotchas |
+| [10-email-kampagnen.md](docs/agents/10-email-kampagnen.md) | E-Mail-Kampagnen, Resend & Opt-Out-Logik |
 
 Verwandte menschorientierte Docs (Gesamtsystem, im Eltern-Ordner): `../docs/SYSTEMARCHITEKTUR.md`,
 `../docs/LOKAL_ENTWICKLUNG.md`. Skript-/DB-Policies: [`scripts/README.md`](scripts/README.md),
