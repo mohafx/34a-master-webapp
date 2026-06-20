@@ -337,6 +337,12 @@ async function main() {
     testEmail = testEmailArg.split('=')[1];
   }
 
+  let limit: number | null = null;
+  const limitArg = args.find(arg => arg.startsWith('--limit='));
+  if (limitArg) {
+    limit = parseInt(limitArg.split('=')[1], 10);
+  }
+
   // Parse sender and URL from env or fallback
   const fromEmail = process.env.RESEND_FROM_EMAIL || '34a Master <support@34a-master.de>';
   const appUrl = process.env.CAMPAIGN_APP_URL || 'https://app.34a-master.de';
@@ -347,6 +353,7 @@ async function main() {
   console.log(`- Supabase URL: ${supabaseUrl}`);
   console.log(`- From Email: ${fromEmail}`);
   console.log(`- App URL: ${appUrl}`);
+  if (limit !== null) console.log(`- Limit: ${limit} users`);
   console.log('---------------------------------------------------------');
 
   if (!isDryRun && !testEmail && !sendAll) {
@@ -354,6 +361,7 @@ async function main() {
     console.log('  npm run campaign:send-oral-exam -- --dry-run             (Preview count and email layout)');
     console.log('  npm run campaign:send-oral-exam -- --test-email=user@domain.com  (Send test to specified email)');
     console.log('  npm run campaign:send-oral-exam -- --send                (Send to ALL users in DB)');
+    console.log('  npm run campaign:send-oral-exam -- --send --limit=80     (Send to a maximum of 80 users)');
     console.log('---------------------------------------------------------');
     process.exit(0);
   }
@@ -416,17 +424,23 @@ async function main() {
   const validUsers = allUsers.filter(u => u.email && !unsubscribedSet.has(u.id));
   console.log(`Total valid users with email address: ${validUsers.length} (Filtered out: ${unsubscribedSet.size} unsubscribed users)`);
 
+  let targetUsers = validUsers;
+  if (limit !== null) {
+    targetUsers = validUsers.slice(0, limit);
+    console.log(`⚠️ Limit parameter detected. Campaign will only target the first ${limit} users (out of ${validUsers.length}).`);
+  }
+
   // 2. Execution logic
   if (isDryRun) {
     console.log('\n--- DRY RUN MODE ---');
-    console.log(`Would send campaign to ${validUsers.length} users.`);
+    console.log(`Would send campaign to ${targetUsers.length} users (Limit: ${limit !== null ? limit : 'none'}).`);
     console.log('Sample users:');
-    validUsers.slice(0, 5).forEach((u, i) => {
+    targetUsers.slice(0, 5).forEach((u, i) => {
       const name = profileMap.get(u.id) || 'N/A';
       console.log(`  ${i+1}. Email: ${u.email} | Name: ${name}`);
     });
-    if (validUsers.length > 5) {
-      console.log(`  ... and ${validUsers.length - 5} more users.`);
+    if (targetUsers.length > 5) {
+      console.log(`  ... and ${targetUsers.length - 5} more users.`);
     }
 
     console.log('\nPreview of HTML Email Template:');
@@ -452,18 +466,18 @@ async function main() {
   }
 
   else if (sendAll) {
-    console.log(`\n⚠️ --- BROADCAST MODE: SENDING TO ${validUsers.length} USERS --- ⚠️`);
+    console.log(`\n⚠️ --- BROADCAST MODE: SENDING TO ${targetUsers.length} USERS (Limit: ${limit !== null ? limit : 'none'}) --- ⚠️`);
     console.log('Are you sure you want to do this? (Starting in 5 seconds...)');
     await new Promise(resolve => setTimeout(resolve, 5000));
 
     let successCount = 0;
     let failCount = 0;
 
-    for (let i = 0; i < validUsers.length; i++) {
-      const user = validUsers[i];
+    for (let i = 0; i < targetUsers.length; i++) {
+      const user = targetUsers[i];
       const name = profileMap.get(user.id) || undefined;
       const html = generateEmailHtml(user.email, name, appUrl);
-      const progress = `[${i + 1}/${validUsers.length}]`;
+      const progress = `[${i + 1}/${targetUsers.length}]`;
 
       try {
         console.log(`${progress} Sending email to: ${user.email} ...`);
