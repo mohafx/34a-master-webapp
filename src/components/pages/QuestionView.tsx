@@ -986,14 +986,6 @@ export default function QuestionView() {
     setIsChecked(true);
     answerQuestion(currentQuestion.id, isCorrect);
 
-    const nextAnsweredQuestions = {
-      ...progress.answeredQuestions,
-      [currentQuestion.id]: isCorrect,
-    };
-    const allLessonQuestionsAnswered = isLessonMode
-      ? queue.every(question => Object.prototype.hasOwnProperty.call(nextAnsweredQuestions, question.id))
-      : false;
-
     // Wenn falsch beantwortet → Erklärung sofort anzeigen
     if (!isCorrect) {
       setShowExplanation(true);
@@ -1025,17 +1017,6 @@ export default function QuestionView() {
           setExamFinished(true);
         }
       }, 1500);
-    } else if (isLessonMode && currentIndex >= queue.length - 1 && allLessonQuestionsAnswered) {
-      window.setTimeout(async () => {
-        try {
-          if (lessonId) {
-            await setLessonCompletion(lessonId, true);
-          }
-        } catch (error) {
-          console.error('Error auto-completing lesson:', error);
-        }
-        setExamFinished(true);
-      }, isCorrect ? 450 : 900);
     }
   };
 

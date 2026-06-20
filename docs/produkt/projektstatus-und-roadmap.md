@@ -15,7 +15,11 @@ Das Projekt ist eine moderne **React 19 SPA** (Vite 6, Tailwind CSS 3, HashRoute
     *   **KI-Auswertung:** Detaillierte structured JSON-Bewertung durch OpenAI (`gpt-4.1`) nach echten IHK-Maßstäben (Gesamtnote, Bestehensschwelle 50 %, prozentuale Bewertung je Antwort, Stärken/Lücken, Musterantworten).
     *   **Audio-Archivierung:** Vollständiges Gesprächs-Audio wird serverseitig geladen und in einem privaten S3-Bucket (`oral-exam-audio`) gesichert. Der Player auf der Ergebnisseite lädt das Audio sicher per signierter URL.
     *   **Optimierungen (2026-06-19):** Behebung des Router-State-Syncs bei wiederholten Auswertungen (Retry) und Einführung einer Trophäen-Karte sowie exklusiver Filter (Schriftlich/Mündlich) im Verlauf.
-    *   **Launch-Gating (aktualisiert 2026-06-20):** Die mündliche Prüfung ist lokal für alle Nutzer sichtbar: Gäste sehen die Karte und müssen sich registrieren, Free-Nutzer haben 1 Mini-Simulation, Premium-Nutzer 10 Prüfungstickets pro Abo-Zeitraum. Das Backend setzt die Tickets über `oral-exam-session` autoritativ durch; `oral-exam-entitlement` liefert den UI-Status. Tickets zählen erst ab echter ElevenLabs-Verbindung (`connected_at`). Supabase ist aktualisiert und verifiziert (`connected_at` live, `oral-exam-audio` privat, Functions deployed); Frontend-Prod-Deploy und echter Provider-Smoke-Test stehen noch aus.
+    *   **Launch-Gating (aktualisiert 2026-06-20):** Die mündliche Prüfung ist lokal für alle Nutzer sichtbar: Gäste sehen die Karte und müssen sich registrieren, Free-Nutzer haben 1 Mini-Simulation, Premium-Nutzer 10 Prüfungstickets pro Abo-Zeitraum. Das Backend setzt die Tickets über `oral-exam-session` autoritativ durch; `oral-exam-entitlement` liefert den UI-Status. Tickets zählen erst ab echter ElevenLabs-Verbindung (`connected_at`). Supabase ist aktualisiert und verifiziert.
+    *   **Prod-Launch (2026-06-20):** `c06097b` — Mündliche Prüfung für alle Nutzer freigeschaltet (nicht mehr Admin-only). PostHog-Tracking für den kompletten Oral-Exam-Funnel hinzugefügt (`548ab0e`). Redeploy mit PostHog-Host-Fix (`fffe945`).
+    *   **Stabilisierung (2026-06-20):** `8357acf` — Connect-basierte Tickets live, Erklärungsbilder-Rollout, Entitlement-Period-Start fixiert.
+*   **Lerninhalte & Lektionsfluss:**
+    *   **Nutzerfeedback-Fix (2026-06-20):** Drei gemeldete StGB-Fragen korrigiert (`questions.correct_answer`: Wodka = C, Schlagstock/Platzwunde = B, Fahrradschloss = B,D) und die Fahrradschloss-Erklärung in Deutsch/Arabisch angepasst. Zusätzlich bleibt bei der letzten Frage einer Lektion die Erklärung sichtbar/öffnbar; die Lektion schließt erst nach Klick auf „Lektion abschließen“. Cache-Version `v3`, Migration `20260620182122` remote angewendet.
 
 ---
 
@@ -31,23 +35,20 @@ Folgende Arbeitspakete sind für die kommenden Sprints geplant:
 *   **Ziel:** Die klassischen Karteikarten (Flashcards) umbauen, um sie als interaktives mündliches KI-Training zu nutzen.
 *   **Umsetzung:** Benutzer sollen die Fragen auf den Karteikarten mündlich beantworten können, woraufhin eine KI die Antwort direkt analysiert und korrigiert (Sprach-zu-Text + kurzes KI-Feedback). Später können die Lernkarten zusätzlich als kuratierte RAG-/Wissensbasis für den ElevenLabs-Agenten dienen.
 
-### Task 3: Mündliche Prüfungssimulation monetarisieren & launchen
+### Task 3: Mündliche Prüfungssimulation monetarisieren & launchen ✅
 *   **Ziel:** Die mündliche Prüfungssimulation als Premium-Feature etablieren.
-*   **Umsetzung:**
-    *   Tarifmodell ist festgelegt: Registrierung erforderlich, 1 Free-Mini-Simulation, Premium mit 10 Vollsimulationen pro Abo-Zeitraum.
-    *   Prüfungstickets zählen erst ab erfolgreicher Verbindung zum ElevenLabs-Prüfer (`connected_at`), damit Mikrofon-Fehler oder Reloads vor der Verbindung kein Ticket verbrauchen.
-    *   Vor Launch: Frontend in Produktion deployen und mit echten Free-/Premium-Konten testen. Supabase-Backend ist seit 2026-06-20 aktualisiert.
+*   **Erledigt (2026-06-20):** Tarifmodell live — Registrierung erforderlich, 1 Free-Mini-Simulation, Premium 10 Vollsimulationen pro Abo-Zeitraum. Tickets zählen erst ab `connected_at`. Frontend in Produktion deployed, PostHog-Funnel-Tracking aktiv.
 
-### Task 4: Paywall anpassen & neue Features integrieren
+### Task 4: Paywall anpassen & neue Features integrieren ✅
 *   **Ziel:** Die Paywall-UI überarbeiten, um die neuen KI-Features prominent zu bewerben und höhere Conversion-Rates zu erzielen.
-*   **Umsetzung:** Integration der Features (Mündliche Prüfung, Audio-Mitschnitt, KI-Feedback) in die Preistabellen und Paywall-Modals.
+*   **Erledigt (2026-06-20):** `33df7e2` — Exam-Intros-Redesign, Modal-Portal-Fix, Paywall-Conversion-Optimierung. `29adec0` — Paywall- und Dashboard-Messaging verfeinert.
 
 ### Task 5: Mündliche KI-Features launchen, per E-Mail vermarkten & SEO-Seiten bauen
 *   **Ziel:** Nutzerakquise und Reaktivierung bestehender Nutzer für das neue Feature.
-*   **Umsetzung:**
-    *   **Öffentlicher Launch:** Mündliche Prüfung öffentlich anzeigen, Registrierung als Einstieg nutzen, Ticketstatus in der UI erklären.
-    *   **E-Mail-Kampagne:** Newsletter-Versand an Bestandsnutzer und Leads (Unter Beachtung der `docs/Email_Design_Guidelines.md`).
-    *   **SEO-Pages:** Erstellung optimierter Landingpages (z. B. `/mündliche-ihk-pruefung-34a-simulator`), um organischen Traffic über Google zu generieren.
+*   **Teilweise erledigt:**
+    *   **Öffentlicher Launch ✅ (2026-06-20):** Mündliche Prüfung für alle Nutzer sichtbar (`c06097b`).
+    *   **E-Mail-Kampagne ✅ (2026-06-20):** `7bb5d5f` — E-Mail-Kampagne für mündliche Prüfungssimulation mit Abmelde-System gebaut. `f059e97` — Daily Limits und Duplikat-Prävention. `2e4eca5` — Dokumentiert in `docs/agents/10-email-kampagnen.md`.
+    *   **SEO-Pages:** Noch ausstehend.
 
 ### Task 5b: UI-Optimierungen nach Launch
 *   **Ziel:** Conversion und Abschlussquote der mündlichen Prüfung verbessern.
