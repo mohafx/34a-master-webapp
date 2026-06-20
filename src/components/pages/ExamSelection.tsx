@@ -91,11 +91,11 @@ export default function ExamSelection() {
         <div className="max-w-4xl mx-auto px-4 pb-32">
             {/* Header */}
             <div className="pt-3 mb-6 md:mb-8">
-                <div className="bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-3xl md:rounded-[2rem] p-5 md:p-10 shadow-card relative overflow-hidden flex flex-col">
-                    <div className="absolute top-0 right-0 w-64 md:w-96 h-64 md:h-96 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/3 blur-3xl pointer-events-none" />
-                    <div className="absolute bottom-0 left-0 w-48 md:w-72 h-48 md:h-72 bg-black/10 rounded-full translate-y-1/3 -translate-x-1/3 blur-3xl pointer-events-none" />
+                <div className="bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-[28px] px-5 pb-0 pt-4 sm:px-7 sm:pt-5 shadow-xl shadow-orange-500/10 relative overflow-hidden flex flex-col">
+                    <div className="absolute -top-16 -right-16 w-64 h-64 bg-white/10 rounded-full blur-3xl opacity-50 pointer-events-none" />
+                    <div className="absolute top-1/2 -left-10 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
 
-                    <div className="flex justify-between items-center relative z-10 w-full mb-2 md:mb-0">
+                    <div className="flex justify-between items-center relative z-10 w-full mb-4">
                         <button
                             onClick={() => navigate('/')}
                             className="w-10 h-10 md:w-12 md:h-12 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-2xl flex items-center justify-center border border-white/20 text-white transition-all active:scale-95 shadow-sm"
@@ -124,87 +124,71 @@ export default function ExamSelection() {
                             <div className="w-10 md:w-12" />
                         )}
                     </div>
+
+                    {/* Verlauf — am unteren Rand des Headers angehängt */}
+                    <button
+                        onClick={() => navigate('/exam/history')}
+                        className="relative z-10 w-full border-t border-white/20 py-3.5 flex items-center justify-between group transition-opacity active:opacity-70"
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                                <FileText size={16} strokeWidth={2.5} className="text-white" />
+                            </div>
+                            <div className="text-left">
+                                <span className="text-sm font-bold text-white leading-tight block">Mein Verlauf</span>
+                                <span className="text-xs text-white/70">Deine Ergebnisse & Auswertungen auf einen Blick.</span>
+                            </div>
+                        </div>
+                        <ChevronRight size={18} className="text-white/60 group-hover:text-white transition-colors" />
+                    </button>
                 </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-3">
                 {/* Schriftliche Prüfungssimulation — öffnet Modal */}
                 <button
                     onClick={() => setShowWrittenModal(true)}
-                    className="w-full text-left bg-white dark:bg-slate-800 rounded-[24px] p-1 shadow-md border-2 border-amber-100 dark:border-amber-900/30 hover:border-amber-500 dark:hover:border-amber-500 transition-all active:scale-[0.98] group relative overflow-hidden"
+                    className="w-full text-left bg-white dark:bg-slate-850 rounded-[24px] px-5 py-5 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-transparent dark:border-slate-800 hover:border-gray-100 dark:hover:border-slate-700 transition-all active:scale-[0.98]"
                 >
-                    <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-orange-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="p-5 relative z-10">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="w-12 h-12 bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20">
-                                <GraduationCap size={24} strokeWidth={2.5} />
-                            </div>
-                            <ChevronRight size={20} className="text-slate-400 dark:text-slate-500" />
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="w-11 h-11 rounded-xl bg-[#E0F2FE] dark:bg-[#0C4A6E] flex items-center justify-center shrink-0">
+                            <GraduationCap size={22} strokeWidth={2.5} className="text-[#2563EB] dark:text-[#93C5FD]" />
                         </div>
-                        <h3 className="font-black text-lg text-slate-900 dark:text-white mb-1">Schriftliche Prüfungssimulation</h3>
-                        {language === 'DE_AR' && <p className="text-sm text-amber-600 dark:text-amber-500 font-bold mb-1 text-right" dir="rtl">محاكاة الامتحان الكتابي</p>}
-                        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-                            Mini-Prüfung (16 Fragen) oder vollständige IHK-Simulation (82 Fragen) — wähle nach dem Klick.
-                        </p>
-                        <div className="flex items-center gap-4 text-xs font-bold text-slate-500 dark:text-slate-400">
-                            <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
-                                Mini · Voll
-                            </span>
-                            <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
-                                20 – 120 Min
-                            </span>
-                        </div>
+                        <ChevronRight size={18} className="text-slate-300 dark:text-slate-600" />
                     </div>
+                    <h3 className="font-bold text-[15px] text-slate-900 dark:text-white mb-1">Schriftliche Prüfungssimulation</h3>
+                    {language === 'DE_AR' && <p className="text-sm text-blue-600 dark:text-blue-400 font-bold mb-1 text-right" dir="rtl">محاكاة الامتحان الكتابي</p>}
+                    <p className="text-[13px] text-[#4B5563] dark:text-[#9CA3AF] leading-relaxed">
+                        Teste dein Wissen — als schnelle Mini oder vollständig wie die echte IHK.
+                    </p>
                 </button>
 
                 {/* Mündliche Prüfung (KI) */}
                 <button
                     onClick={handleOralExamClick}
-                    className="w-full text-left bg-white dark:bg-slate-800 rounded-[24px] p-1 shadow-md border-2 border-violet-100 dark:border-violet-900/30 hover:border-violet-500 dark:hover:border-violet-500 transition-all active:scale-[0.98] group relative overflow-hidden"
+                    className="w-full text-left bg-white dark:bg-slate-850 rounded-[24px] px-5 py-5 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)] border border-transparent dark:border-slate-800 hover:border-gray-100 dark:hover:border-slate-700 transition-all active:scale-[0.98]"
                 >
-                    <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="p-5 relative z-10">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="w-12 h-12 bg-gradient-to-br from-violet-600 to-indigo-700 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/20">
-                                <Mic size={24} strokeWidth={2.5} />
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2.5">
+                            <div className="w-11 h-11 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center shrink-0">
+                                <Mic size={22} strokeWidth={2.5} className="text-indigo-600 dark:text-indigo-400" />
                             </div>
-                            <span className={`text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full ${isPremium
-                                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
-                                : 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300'
-                                }`}>
-                                {oralBadgeText}
+                            <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                                Beta
                             </span>
                         </div>
-                        <h3 className="font-black text-lg text-slate-900 dark:text-white mb-1">Mündliche Prüfung</h3>
-                        {language === 'DE_AR' && <p className="text-sm text-violet-600 dark:text-violet-500 font-bold mb-1 text-right" dir="rtl">الامتحان الشفوي</p>}
-                        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-                            KI-Prüfersimulation mit Sprache: Fallbeispiele, Rückfragen und Auswertung.
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-                            <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
-                                Sprachgesteuert
-                            </span>
-                            <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg">
-                                {isPremium ? <Crown size={12} /> : <Zap size={12} />}
-                                {isPremium ? 'Premium · Voll' : 'Free · Mini'}
-                            </span>
-                        </div>
+                        <span className={`text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-full ${isPremium
+                            ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                            : 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
+                            }`}>
+                            {oralBadgeText}
+                        </span>
                     </div>
-                </button>
-
-                {/* Abgeschlossene Prüfungen */}
-                <button
-                    onClick={() => navigate('/exam/history')}
-                    className="w-full text-left bg-white dark:bg-slate-800 rounded-[24px] p-5 shadow-sm border border-slate-100 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-all active:scale-[0.99] flex items-center gap-4"
-                >
-                    <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center">
-                        <FileText size={24} className="text-slate-600 dark:text-slate-300" strokeWidth={2.5} />
-                    </div>
-                    <div className="flex-1">
-                        <h3 className="font-black text-base text-slate-900 dark:text-white mb-0.5">Abgeschlossene Prüfungen</h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">Schriftliche und mündliche Prüfungen ansehen.</p>
-                    </div>
-                    <ChevronRight size={20} className="text-slate-300 dark:text-slate-600 flex-shrink-0" />
+                    <h3 className="font-bold text-[15px] text-slate-900 dark:text-white mb-1">Mündliche Prüfung</h3>
+                    {language === 'DE_AR' && <p className="text-sm text-indigo-600 dark:text-indigo-400 font-bold mb-1 text-right" dir="rtl">الامتحان الشفوي</p>}
+                    <p className="text-[13px] text-[#4B5563] dark:text-[#9CA3AF] leading-relaxed">
+                        Sprich mit dem KI-Prüfer und erhalte danach eine detaillierte Auswertung.
+                    </p>
                 </button>
             </div>
 

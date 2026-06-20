@@ -1,7 +1,7 @@
 ---
 title: Stolperfallen (Gotchas)
 scope: Bekannte Fallen, die teure Fehler verursachen
-last_verified: 2026-06-15
+last_verified: 2026-06-20
 ---
 
 # Stolperfallen (immer überfliegen)
@@ -47,3 +47,14 @@ Es gibt nur gezielte `npm run test:*`-Befehle. Für alles andere `npx vitest`
 ## 8. Veraltete Links im root `README.md`
 Der root `README.md` verweist auf `../docs/`-Pfade, die teils nicht (mehr) existieren. Für
 Agenten-Kontext stattdessen `AGENTS.md` und `docs/agents/` nutzen.
+
+## 9. Modale in CSS-`transform`-Eltern → `createPortal` pflicht
+`FreestyleDashboardContent` (und andere Wrapper) nutzen `transform: scale(...)`. Das erzeugt einen
+neuen Stacking Context — Modal-Overlays (`position: fixed`) bleiben darin gefangen und bedecken die
+Seite nicht vollständig. **Fix:** `createPortal(modalJsx, document.body)` in `Dashboard.tsx` für das
+Exam-Auswahl-Modal. Bei jedem neuen Modal innerhalb eines `transform`-Elternelements dasselbe tun.
+
+## 10. Back-Buttons: `navigate(-1)` statt hartcodierter Route
+`navigate('/exam')` in Intro-Seiten führt immer zur Prüfungsauswahl, egal woher der Nutzer kam.
+Alle Zurück-Buttons in `MiniExamIntro`, `ExamIntro` und `OralExamIntro` nutzen `navigate(-1)`.
+Bei neuen Intro-/Interstitial-Seiten dasselbe Muster verwenden.

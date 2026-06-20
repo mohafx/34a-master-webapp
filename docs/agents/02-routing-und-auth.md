@@ -1,7 +1,7 @@
 ---
 title: Routing & Authentifizierung
 scope: HashRouter, Routen, Supabase-Auth, Login/Reset-Flows
-last_verified: 2026-06-15
+last_verified: 2026-06-20
 ---
 
 # Routing & Authentifizierung
@@ -55,6 +55,10 @@ Zusammenspiel mit dem HashRouter.
   `/reset-password` (`ResetPassword`), `/complete-registration` (`CompleteRegistration`).
 - Payment-Rückkehr: `/payment-success`, `/guest-payment-success` (siehe 05-payments-stripe.md).
 - Admin (geschützt durch `AdminGuard`): `/admin`, `/admin/written-exam[...]`.
+- Prüfungs-Intros (jeweils Intro-Seite vor dem eigentlichen Modus):
+  - `/exam/mini-intro` → `MiniExamIntro` (blau, Zap-Icon)
+  - `/exam/intro` → `ExamIntro` (amber, GraduationCap-Icon)
+  - `/oral-exam` → `OralExamIntro` (indigo, Mic-Icon) — auch Einstieg in die mündliche Prüfung
 - Auth-UI-Komponenten in `src/components/auth/` (z. B. `AuthDialog`).
 - Auth-State über `src/contexts/AuthContext.tsx`.
 

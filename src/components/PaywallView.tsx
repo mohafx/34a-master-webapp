@@ -6,7 +6,7 @@ import { usePostHog } from '../contexts/PostHogProvider';
 import { supabase } from '../lib/supabase';
 import { getEmailDomain, getTikTokAnalyticsContext, trackTikTokServerEvent } from '../utils/tiktokAnalytics';
 import { trackServerEvent } from '../services/serverAnalytics';
-import { X, Crown, Check, MessageCircle, Infinity, ShieldCheck, Rocket, Languages, ChevronDown, BookOpen, Pencil, GraduationCap, Target, Trophy, Mail, LogIn, Eye, EyeOff, UserRound } from 'lucide-react';
+import { X, Crown, Check, MessageCircle, Infinity, ShieldCheck, Rocket, Languages, ChevronDown, BookOpen, Pencil, GraduationCap, Target, Trophy, Mail, LogIn, Eye, EyeOff, UserRound, Mic } from 'lucide-react';
 import { EmbeddedPayment } from './EmbeddedPayment';
 import { TransitionAccessNotice } from './TransitionAccessNotice';
 
@@ -439,19 +439,28 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
             items: [
                 {
                     icon: <Target size={20} />,
-                    titleDE: 'Lernplan',
+                    titleDE: 'Dein Lernplan',
                     titleAR: 'خطة دراسية',
-                    descDE: 'Schritt für Schritt bis zur Prüfung',
-                    descAR: 'خطوة بخطوة حتى الامتحان',
+                    descDE: 'Weißt du nicht, womit du anfangen sollst? Dein täglicher Fahrplan bis zum Prüfungstag.',
+                    descAR: 'لا تعرف من أين تبدأ؟ خطتك اليومية حتى يوم الامتحان',
                     badge: 'GEFÜHRT',
                     badgeType: 'quality'
                 },
                 {
+                    icon: <BookOpen size={20} />,
+                    titleDE: 'Alles verständlich erklärt',
+                    titleAR: 'الوحدات',
+                    descDE: 'Alle Paragraphen & Themen — einfach erklärt, auch wenn viel Fachwissen fehlt.',
+                    descAR: 'كل الفصول والموضوعات — مشروحة ببساطة',
+                    badge: 'A–Z',
+                    badgeType: 'quality'
+                },
+                {
                     icon: <Pencil size={20} />,
-                    titleDE: 'Prüfungsfragen',
+                    titleDE: 'Übungsfragen mit Lösung',
                     titleAR: 'أسئلة الامتحان',
-                    descDE: 'Nach Themen sortiert, mit Erklärungen',
-                    descAR: 'مرتبة حسب المواضيع مع شرح',
+                    descDE: 'Übe echte IHK-Fragen — mit Erklärung zu jeder Antwort, bis keine mehr Angst macht.',
+                    descAR: 'تدرب على أسئلة IHK الحقيقية — مع شرح لكل إجابة',
                     badge: '700+',
                     badgeType: 'quantity'
                 },
@@ -459,19 +468,10 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                     icon: <GraduationCap size={20} />,
                     titleDE: 'Prüfungssimulation',
                     titleAR: 'محاكاة الامتحان',
-                    descDE: 'Schriftlich und mündlich wie in der echten Prüfung',
-                    descAR: 'تدرب على الوقت والتنسيق كما في الامتحان',
+                    descDE: 'Stell dich dem Ernstfall — und sieh schwarz auf weiß, ob du bestehst.',
+                    descAR: 'واجه الموقف الحقيقي — واعرف إن كنت ستنجح',
                     badge: 'IHK-NAH',
                     badgeType: 'quality'
-                },
-                {
-                    icon: <BookOpen size={20} />,
-                    titleDE: 'Module',
-                    titleAR: 'الوحدات',
-                    descDE: 'Komplettes Prüfungswissen freigeschaltet',
-                    descAR: 'تم فتح معرفة الامتحان كاملة',
-                    badge: '9 MODULE',
-                    badgeType: 'quantity'
                 },
             ]
         }
@@ -575,9 +575,9 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                                 <Trophy size={20} className="fill-blue-600/20" />
                                             </div>
                                             <div className="flex flex-col text-left">
-                                                <h3 className="font-bold text-slate-900 dark:text-white leading-tight text-[15px]">Was du bekommst</h3>
+                                                <h3 className="font-bold text-slate-900 dark:text-white leading-tight text-[15px]">Dein komplettes Lernpaket</h3>
                                                 <div className="flex items-center gap-1.5 mt-0.5">
-                                                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Alles für deinen Erfolg</p>
+                                                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Bestehe deine §34a-Prüfung beim ersten Versuch</p>
                                                     {showArabic && <span className="text-[10px] opacity-60 ml-1" dir="rtl">ما ستحصل عليه</span>}
                                                 </div>
                                             </div>
@@ -591,33 +591,9 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                     <div className={`grid transition-all duration-500 ease-out ${valueStackOpen ? 'grid-rows-[1fr] opacity-100 mt-5 pt-5 border-t border-slate-100 dark:border-slate-800' : 'grid-rows-[0fr] opacity-0'}`}>
                                         <div className="overflow-hidden">
                                             <div className="space-y-6 pb-1">
-                                                {!isTikTokPaywall && (
-                                                    <div className="relative overflow-hidden rounded-2xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/20 p-4">
-                                                        <div className="absolute right-3 top-3 rounded-full bg-white dark:bg-blue-950/70 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-300">
-                                                            Neu
-                                                        </div>
-                                                        <div className="flex items-start gap-3 pr-12">
-                                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-500/20">
-                                                                <MessageCircle size={20} strokeWidth={2.6} />
-                                                            </div>
-                                                            <div className="min-w-0">
-                                                                <h4 className="text-[15px] font-black leading-tight text-slate-900 dark:text-white">
-                                                                    KI-Mündliche Prüfung
-                                                                </h4>
-                                                                <p className="mt-1 text-[12px] font-semibold leading-snug text-slate-600 dark:text-slate-300">
-                                                                    Übe echte Prüfungssituationen und gehe sicherer in die mündliche Prüfung.
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                                                            <Check size={14} strokeWidth={3} />
-                                                            Auswertung + Audio inklusive
-                                                        </div>
-                                                    </div>
-                                                )}
                                                 {benefitGroups.map((group, gIdx) => (
                                                     <div key={gIdx} className="space-y-3">
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{group.nameDE}</p>
+                                                        {false && <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">{group.nameDE}</p>}
                                                         <div className="space-y-3">
                                                             {group.items.map((item: any, i) => (
                                                                 <div key={i} className="flex items-start gap-3 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors">
@@ -642,6 +618,34 @@ export function PaywallView({ onClose, featureName, isEmbedded = false, tiktokPl
                                                         </div>
                                                     </div>
                                                 ))}
+                                                {!isTikTokPaywall && (
+                                                    <div className="flex items-start gap-3 p-2 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 mt-1">
+                                                        <div className="relative shrink-0 mt-0.5">
+                                                            <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                                                                <Mic size={16} strokeWidth={2.5} />
+                                                            </div>
+                                                            <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-blue-500 border-2 border-white dark:border-slate-900 flex items-center justify-center">
+                                                                <Check size={8} strokeWidth={4} className="text-white" />
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex-1 pt-0.5">
+                                                            <div className="flex items-center gap-2 mb-0.5">
+                                                                <span className="text-[13px] font-bold text-slate-700 dark:text-slate-200">KI-Mündliche Prüfung</span>
+                                                                <span className="bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase">Exklusiv</span>
+                                                            </div>
+                                                            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">Die mündliche Prüfung überrascht viele. Übe jetzt mit dem KI-Prüfer — wie in der echten IHK.</p>
+                                                            <div className="mt-1.5 flex items-center gap-1.5">
+                                                                <span className="flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                                                                    <Check size={10} strokeWidth={3} /> KI-Bewertung
+                                                                </span>
+                                                                <span className="text-slate-300 dark:text-slate-600">·</span>
+                                                                <span className="flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                                                                    <Check size={10} strokeWidth={3} /> Audio-Aufnahme
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
