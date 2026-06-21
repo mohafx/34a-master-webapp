@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { ChevronRight, Check, FileText, BarChart3, Cloud, LayoutList, Languages, BookOpen } from 'lucide-react';
 import ProgressDots from './ProgressDots';
-import { PaywallView } from '../PaywallView';
 import { getEffectiveExamDate } from '../../utils/appStorage';
 
+const PaywallView = lazy(() =>
+    import('../PaywallView').then((module) => ({ default: module.PaywallView }))
+);
 
 export interface OnboardingData {
     examDate: string | null;
@@ -291,10 +293,12 @@ export default function FirstTimeOnboarding({ userName, onComplete }: FirstTimeO
                         {/* Screen 3 Content - Paywall */}
                         {currentScreen === 2 && (
                             <div className="animate-fadeUp flex-1 flex flex-col min-h-screen">
-                                <PaywallView 
-                                    isEmbedded={true} 
-                                    onClose={handleStart} 
-                                />
+                                <Suspense fallback={<div className="flex-1 bg-white" />}>
+                                    <PaywallView
+                                        isEmbedded={true}
+                                        onClose={handleStart}
+                                    />
+                                </Suspense>
                             </div>
                         )}
                     </div>

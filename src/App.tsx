@@ -7,7 +7,6 @@ import { DataCacheProvider, useDataCache } from './contexts/DataCacheContext';
 import { SubscriptionProvider, useSubscription } from './contexts/SubscriptionContext';
 import { ToastProvider, toast } from './contexts/ToastContext';
 import { PostHogProvider, usePostHog, usePageTracking } from './contexts/PostHogProvider';
-import { PaywallDialog } from './components/PaywallDialog';
 import { db, guestStorage } from './services/database';
 import { supabase } from './lib/supabase';
 import { getLessonQuestionProgress, isQuestionBasedLesson } from './services/lessonFlow';
@@ -15,9 +14,6 @@ import SplashScreen from './components/SplashScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import DesktopLayout from './components/layout/DesktopLayout';
 
-// Icons
-import { GraduationCap, User as UserIcon, HelpCircle, ArrowRight, Languages, Settings } from 'lucide-react';
-import * as Icons from 'lucide-react';
 import { QuizSettingsDialog } from './components/pages/QuizSettingsDialog';
 
 // Frequently used pages - loaded immediately
@@ -45,6 +41,9 @@ import {
 
 // Code-split large components - loaded on demand
 
+const PaywallDialog = lazy(() =>
+  import('./components/PaywallDialog').then((module) => ({ default: module.PaywallDialog }))
+);
 const ModuleList = lazy(() => import('./components/pages/ModuleList'));
 const ModuleDetail = lazy(() => import('./components/pages/ModuleDetail'));
 const QuestionView = lazy(() => import('./components/pages/QuestionView'));
@@ -1020,12 +1019,14 @@ function AppContent() {
 
             {/* Global Paywall Dialog */}
             {showPaywallDialog && (
-              <PaywallDialog
-                onClose={() => {
-                  setShowPaywallDialog(false);
-                }}
-                featureName={paywallFeatureName}
-              />
+              <Suspense fallback={null}>
+                <PaywallDialog
+                  onClose={() => {
+                    setShowPaywallDialog(false);
+                  }}
+                  featureName={paywallFeatureName}
+                />
+              </Suspense>
             )}
 
             {/* Cookie Consent Banner */}
