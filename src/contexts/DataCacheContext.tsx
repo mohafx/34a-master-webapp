@@ -9,6 +9,8 @@ interface DataCacheContextType {
   questions: Question[];
   flashcards: any[]; // Or define Flashcard here, but for brevity using any
   loading: boolean;
+  fullDataLoading: boolean;
+  fullDataReady: boolean;
   loadingStatus: string;
   error: string | null;
   getModuleById: (id: string) => Module | undefined;
@@ -36,57 +38,63 @@ function getFirstLessonIds(modules: Module[]): Set<string> {
 
 export function DataCacheProvider({ children }: { children: ReactNode }) {
   const { loading: authLoading } = useAuth();
-  const { loading: subscriptionLoading, isPremium } = useSubscription();
+  const { loading: subscriptionLoading } = useSubscription();
   const [modules, setModules] = useState<Module[]>([]);
   const [allQuestions, setAllQuestions] = useState<Question[]>([]); // All questions from DB
   const [questions, setQuestions] = useState<Question[]>([]); // All questions (no filtering)
   const [allFlashcards, setAllFlashcards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fullDataLoading, setFullDataLoading] = useState(false);
+  const [fullDataReady, setFullDataReady] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('Initialisiere...');
   const [error, setError] = useState<string | null>(null);
 
   // localStorage cache keys
-  const CACHE_SCHEMA_VERSION = 'v3';
+  const CACHE_SCHEMA_VERSION = 'v4';
   const CACHE_KEY_MODULES = `34a_cache_${CACHE_SCHEMA_VERSION}_modules`;
   const CACHE_KEY_QUESTIONS = `34a_cache_${CACHE_SCHEMA_VERSION}_questions`;
   const CACHE_KEY_FLASHCARDS = `34a_cache_${CACHE_SCHEMA_VERSION}_flashcards`;
+  const CACHE_KEY_FULL_READY = `34a_cache_${CACHE_SCHEMA_VERSION}_full_ready`;
   const CACHE_TIMESTAMP_KEY = `34a_cache_${CACHE_SCHEMA_VERSION}_timestamp`;
   const CACHE_MAX_AGE_MS = 1000 * 60 * 60; // 1 hour cache validity
 
-  const loadFromCache = (): { modules: Module[] | null; questions: Question[] | null; flashcards: any[] | null } => {
+  const loadFromCache = (): { modules: Module[] | null; questions: Question[] | null; flashcards: any[] | null; fullDataReady: boolean } => {
     try {
       const timestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
-      if (!timestamp) return { modules: null, questions: null, flashcards: null };
+      if (!timestamp) return { modules: null, questions: null, flashcards: null, fullDataReady: false };
 
       const cacheAge = Date.now() - parseInt(timestamp, 10);
       if (cacheAge > CACHE_MAX_AGE_MS) {
         console.log('📦 [DataCache] Cache expired, will refresh');
-        return { modules: null, questions: null, flashcards: null };
+        return { modules: null, questions: null, flashcards: null, fullDataReady: false };
       }
 
       const modulesStr = localStorage.getItem(CACHE_KEY_MODULES);
       const questionsStr = localStorage.getItem(CACHE_KEY_QUESTIONS);
       const flashcardsStr = localStorage.getItem(CACHE_KEY_FLASHCARDS);
+      const cachedFullDataReady = localStorage.getItem(CACHE_KEY_FULL_READY) === 'true';
 
       if (modulesStr && questionsStr && flashcardsStr) {
         console.log('⚡ [DataCache] Loading from localStorage cache');
         return {
           modules: JSON.parse(modulesStr),
           questions: JSON.parse(questionsStr),
-          flashcards: JSON.parse(flashcardsStr)
+          flashcards: JSON.parse(flashcardsStr),
+          fullDataReady: cachedFullDataReady
         };
       }
     } catch (e) {
       console.warn('Cache read error:', e);
     }
-    return { modules: null, questions: null, flashcards: null };
+    return { modules: null, questions: null, flashcards: null, fullDataReady: false };
   };
 
-  const saveToCache = (modules: Module[], questions: Question[], flashcards: any[]) => {
+  const saveToCache = (modules: Module[], questions: Question[], flashcards: any[], cacheHasFullData: boolean) => {
     try {
       localStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(modules));
       localStorage.setItem(CACHE_KEY_QUESTIONS, JSON.stringify(questions));
       localStorage.setItem(CACHE_KEY_FLASHCARDS, JSON.stringify(flashcards));
+      localStorage.setItem(CACHE_KEY_FULL_READY, cacheHasFullData ? 'true' : 'false');
       localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
       console.log('💾 [DataCache] Saved to localStorage cache');
     } catch (e) {
@@ -122,26 +130,77 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  const mergeQuestions = (previewData: any[], questionsData: any[]): Question[] => {
+    const mappedFullQuestions = mapQuestions(questionsData);
+    const fullById = new Map(mappedFullQuestions.map(question => [question.id, question]));
+
+    return previewData.map((p: any) => {
+      const fullVersion = fullById.get(p.id);
+      if (fullVersion) {
+        return fullVersion;
+      }
+
+      return {
+        id: p.id,
+        moduleId: p.moduleId,
+        lessonId: p.lessonId,
+        textDE: p.textDE,
+        textAR: p.textAR,
+        type: p.type,
+        difficulty: p.difficulty,
+        orderIndex: p.orderIndex,
+        global_order_index: p.global_order_index,
+        answers: [],
+        explanationDE: '',
+        explanationAR: '',
+        explanationImageUrl: p.question_explanation_image_url || p.explanationImageUrl,
+        explanationImageAltDE: p.question_explanation_image_alt_de || p.explanationImageAltDE,
+        isFree: p.is_free || p.isFree || false,
+        quality_check: p.quality_check ?? null,
+        reviewed: p.reviewed ?? false,
+        updated_at: p.updated_at ?? null
+      };
+    });
+  };
+
+  const mergeFlashcards = (previewFlashcards: any[], flashcardsData: any[]): any[] => {
+    const fullById = new Map(flashcardsData.map((flashcard: any) => [flashcard.id, flashcard]));
+
+    return previewFlashcards.map((p: any) => {
+      const fullVersion = fullById.get(p.id);
+      if (fullVersion) {
+        return fullVersion;
+      }
+
+      return {
+        id: p.id,
+        moduleId: p.moduleId,
+        lessonId: p.lessonId,
+        orderIndex: p.orderIndex,
+        questionDE: p.questionDE,
+        questionAR: p.questionAR,
+        answerDE: '',
+        answerAR: '',
+        hintDE: '',
+        hintAR: ''
+      };
+    });
+  };
+
   const loadAllData = async () => {
     const startTime = Date.now();
     console.log('🚀 [DataCache] Starting data load...');
 
     // 1. Try to load from cache FIRST for instant UI
     const cached = loadFromCache();
-    // If we have cache AND user is NOT premium (or status didn't change), use it.
-    // BUT if user IS premium, we might need to check if cache is "full" or "partial".
-    // For simplicity: If cached data count is low (< 100) but User IS Premium, we force refresh.
-    // Otherwise use cache.
 
-    const seemsPartial = cached.questions && cached.questions.length < 100;
-    const shouldIgnoreCache = isPremium && seemsPartial;
-
-    if (!shouldIgnoreCache && cached.modules && cached.questions && cached.flashcards) {
+    if (cached.modules && cached.questions && cached.flashcards) {
       setModules(cached.modules);
       setAllQuestions(cached.questions);
       setQuestions(cached.questions);
       setAllFlashcards(cached.flashcards);
-      const status = authLoading ? 'Benutzer wird angemeldet...' : 'Daten werden geladen...';
+      setFullDataReady(cached.fullDataReady);
+      setFullDataLoading(!cached.fullDataReady);
       console.log('[DEBUG] App loading state:', { authLoading, dataLoading: loading, subscriptionLoading, dataError: error });
       setLoading(false);
       console.log(`⚡ [DataCache] Cache loaded in ${Date.now() - startTime}ms`, { 
@@ -151,7 +210,7 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
       });
 
       // 2. Refresh in background (don't wait)
-      refreshFromNetwork(true).catch(err => console.warn('Background refresh failed:', err));
+      refreshFromNetwork(true, !cached.fullDataReady).catch(err => console.warn('Background refresh failed:', err));
       return;
     }
 
@@ -159,13 +218,13 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     await refreshFromNetwork();
   };
 
-  const refreshFromNetwork = async (silent: boolean = false) => {
+  const refreshFromNetwork = async (silent: boolean = false, applyPreviewState: boolean = true) => {
     const startTime = Date.now();
 
     try {
       if (!silent) setLoading(true);
       setError(null);
-      setLoadingStatus('Lade Daten...');
+      setLoadingStatus('Lade Basisdaten...');
 
       const TIMEOUT_MS = 60000;
       const withTimeout = <T,>(promise: Promise<T>): Promise<T> =>
@@ -176,93 +235,94 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
           )
         ]);
 
-      console.log('🌐 [DataCache] Loading data in parallel...');
-      const [modulesData, questionsData, previewData, flashcardsData, previewFlashcards] = await withTimeout(
+      console.log('🌐 [DataCache] Loading preview data...');
+      const [modulesData, previewData, previewFlashcards] = await withTimeout(
         Promise.all([
           db.getModules(),
-          db.getAllQuestions(),
           db.getQuestionsPreview(),
-          db.getAllFlashcards(),
           db.getFlashcardsPreview()
         ])
       );
 
-      console.log(`✅ [DataCache] Parallel load complete in ${Date.now() - startTime}ms`);
-      console.log(`   Modules: ${modulesData.length}, Full Questions: ${questionsData.length}, Preview Questions: ${previewData.length}`);
-      console.log(`   Full Flashcards: ${flashcardsData.length}, Preview Flashcards: ${previewFlashcards.length}`);
+      console.log(`✅ [DataCache] Preview load complete in ${Date.now() - startTime}ms`);
+      console.log(`   Modules: ${modulesData.length}, Preview Questions: ${previewData.length}, Preview Flashcards: ${previewFlashcards.length}`);
 
       setLoadingStatus('Verarbeite Daten...');
 
-      const mappedFullQuestions = mapQuestions(questionsData);
+      const previewQuestions = mergeQuestions(previewData, []);
+      const previewFlashcardsOnly = mergeFlashcards(previewFlashcards, []);
+      console.log(`   Preview Questions: ${previewQuestions.length} (Visible in UI)`);
+      console.log(`   Preview Flashcards: ${previewFlashcardsOnly.length} (Visible in UI)`);
 
-      // Merge Strategy: Start with Preview (Skeleton), overwrite with Full (if available)
-      const mergedQuestions = previewData.map((p: any) => {
-        const fullVersion = mappedFullQuestions.find(f => f.id === p.id);
-        if (fullVersion) {
-          return fullVersion; // This one has answers and correct solution
-        }
-        // Otherwise use preview version (No answers, effectively locked)
-        return {
-          id: p.id,
-          moduleId: p.moduleId,
-          lessonId: p.lessonId,
-          textDE: p.textDE,
-          textAR: p.textAR,
-          type: p.type,
-          difficulty: p.difficulty,
-          orderIndex: p.orderIndex,
-          global_order_index: p.global_order_index,
-          answers: [], // LOCKED / HIDDEN
-          explanationDE: '',
-          explanationAR: '',
-          explanationImageUrl: p.question_explanation_image_url || p.explanationImageUrl,
-          explanationImageAltDE: p.question_explanation_image_alt_de || p.explanationImageAltDE,
-          isFree: p.is_free || p.isFree || false
-        };
-      });
-
-      console.log(`   Merged Questions: ${mergedQuestions.length} (Visible in UI)`);
-
-      // Merge Flashcards Strategy
-      const mergedFlashcards = previewFlashcards.map((p: any) => {
-        const fullVersion = flashcardsData.find((f: any) => f.id === p.id);
-        if (fullVersion) {
-          return fullVersion;
-        }
-        // Otherwise use preview version (No answers, effectively locked)
-        return {
-          id: p.id,
-          moduleId: p.moduleId,
-          lessonId: p.lessonId,
-          orderIndex: p.orderIndex,
-          questionDE: p.questionDE,
-          questionAR: p.questionAR,
-          answerDE: '', // LOCKED
-          answerAR: '',
-          hintDE: '',
-          hintAR: ''
-        };
-      });
-      console.log(`   Merged Flashcards: ${mergedFlashcards.length} (Visible in UI)`);
-
-      setModules(modulesData);
-      setAllQuestions(mergedQuestions);
-      setQuestions(mergedQuestions);
-      setAllFlashcards(mergedFlashcards); // Update with merged
-
-      // Save to cache for next time
-      saveToCache(modulesData, mergedQuestions, mergedFlashcards);
+      if (applyPreviewState) {
+        setModules(modulesData);
+        setAllQuestions(previewQuestions);
+        setQuestions(previewQuestions);
+        setAllFlashcards(previewFlashcardsOnly);
+        setFullDataReady(false);
+        saveToCache(modulesData, previewQuestions, previewFlashcardsOnly, false);
+      }
+      setFullDataLoading(true);
 
       setLoadingStatus('Fertig!');
-      console.log(`✨ [DataCache] Total time: ${Date.now() - startTime}ms`);
+      if (!silent) setLoading(false);
+      console.log(`✨ [DataCache] Initial data ready in ${Date.now() - startTime}ms`);
+
+      void loadFullDataInBackground(modulesData, previewData, previewFlashcards);
 
     } catch (err: any) {
       const errorMessage = err?.message || 'Unbekannter Fehler';
       console.error('❌ [DataCache] Error loading data:', errorMessage);
       setLoadingStatus('Fehler aufgetreten');
       setError(`Fehler beim Laden der Daten: ${errorMessage}`);
+      if (!silent) setLoading(false);
+      setFullDataLoading(false);
+      setFullDataReady(false);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  };
+
+  const loadFullDataInBackground = async (modulesData: Module[], previewData: any[], previewFlashcards: any[]) => {
+    const startTime = Date.now();
+
+    try {
+      const TIMEOUT_MS = 60000;
+      const withTimeout = <T,>(promise: Promise<T>): Promise<T> =>
+        Promise.race([
+          promise,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error('Datenbank-Timeout nach 60 Sekunden')), TIMEOUT_MS)
+          )
+        ]);
+
+      console.log('🌐 [DataCache] Loading full data in background...');
+      const [questionsData, flashcardsData] = await withTimeout(
+        Promise.all([
+          db.getAllQuestions(),
+          db.getAllFlashcards()
+        ])
+      );
+
+      const mergedQuestions = mergeQuestions(previewData, questionsData);
+      const mergedFlashcards = mergeFlashcards(previewFlashcards, flashcardsData);
+
+      setAllQuestions(mergedQuestions);
+      setQuestions(mergedQuestions);
+      setAllFlashcards(mergedFlashcards);
+      setFullDataReady(true);
+      saveToCache(modulesData, mergedQuestions, mergedFlashcards, true);
+
+      console.log(`✅ [DataCache] Full data ready in ${Date.now() - startTime}ms`, {
+        questions: mergedQuestions.length,
+        flashcards: mergedFlashcards.length
+      });
+    } catch (err: any) {
+      const errorMessage = err?.message || 'Unbekannter Fehler';
+      console.warn('⚠️ [DataCache] Full background data load failed:', errorMessage);
+      setFullDataReady(false);
+    } finally {
+      setFullDataLoading(false);
     }
   };
 
@@ -271,7 +331,7 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
     if (!authLoading && !subscriptionLoading) {
       loadAllData();
     }
-  }, [authLoading, subscriptionLoading, isPremium]); // Re-run if isPremium changes
+  }, [authLoading, subscriptionLoading]);
 
   // No filtering in cache - access control is done at UI level
   // This ensures all lessons are always displayed
@@ -300,6 +360,8 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
       questions,
       flashcards: allFlashcards,
       loading,
+      fullDataLoading,
+      fullDataReady,
       loadingStatus,
       error,
       getModuleById,
@@ -320,6 +382,3 @@ export function useDataCache() {
   }
   return context;
 }
-
-
-

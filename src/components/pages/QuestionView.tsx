@@ -314,8 +314,11 @@ export default function QuestionView() {
               finalQueue = finalQueue.sort(() => 0.5 - Math.random());
             }
 
-            // Ensure we have questions, otherwise fallback to DB
-            if (finalQueue.length > 0) {
+            const hasUsableAnswers = finalQueue.every(q => Array.isArray(q.answers) && q.answers.length > 0);
+
+            // Ensure we have complete questions, otherwise fallback to DB.
+            // Preview cache entries intentionally have empty answers during cold start.
+            if (finalQueue.length > 0 && hasUsableAnswers) {
               setQueue(finalQueue);
               if (isLessonMode) {
                 const startIndex = startQuestionId ? finalQueue.findIndex(q => q.id === startQuestionId) : -1;
@@ -327,6 +330,10 @@ export default function QuestionView() {
                 setCurrentIndex(0);
               }
               return; // EXIT EARLY - NO NETWORK CALL
+            }
+
+            if (finalQueue.length > 0) {
+              console.log('⏳ [QuestionView] Cached preview questions have no answers yet, falling back to DB');
             }
           }
         }
