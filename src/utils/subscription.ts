@@ -1,4 +1,4 @@
-export type SubscriptionStatus = 'free' | 'active' | 'canceled' | 'past_due' | 'trialing';
+export type SubscriptionStatus = 'free' | 'active' | 'canceled' | 'past_due' | 'trialing' | 'refunded';
 export type SubscriptionPlan = 'free' | 'monthly' | '6months';
 export type SubscriptionProvider = 'stripe' | 'apple' | 'google';
 
@@ -16,6 +16,10 @@ export function hasPremiumAccess(subscription: SubscriptionLike | null | undefin
   }
 
   if (!subscription) {
+    return false;
+  }
+
+  if (subscription.status === 'free' || subscription.status === 'refunded') {
     return false;
   }
 

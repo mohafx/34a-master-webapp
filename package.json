@@ -27,6 +27,7 @@
     "analytics:backfill-stripe:dry-run": "node scripts/backfill-stripe-posthog.mjs",
     "analytics:backfill-stripe:apply": "node scripts/backfill-stripe-posthog.mjs --apply",
     "test:oral-exam-entitlement": "vitest run tests/oralExamEntitlement.test.ts",
+    "test:premium-entitlement": "vitest run tests/premiumEntitlementStatus.test.ts tests/subscriptionAccess.test.ts tests/paymentRecovery.test.ts",
     "test:oral-exam-routing": "vitest run tests/oralExamRouting.test.ts",
     "test:oral-exam-scenarios": "vitest run tests/oralExamScenarios.test.ts",
     "test:transition-access": "vitest run tests/transitionAccess.test.ts",

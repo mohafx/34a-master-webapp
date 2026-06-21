@@ -544,16 +544,30 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
         .maybeSingle();
 
     if (sub?.user_id) {
-        // Mark as refunded (could add 'refunded' status or just cancel)
+        const nowIso = new Date().toISOString();
         await supabaseAdmin
             .from('subscriptions')
             .update({
-                status: 'canceled',
-                updated_at: new Date().toISOString(),
+                status: 'refunded',
+                current_period_end: nowIso,
+                updated_at: nowIso,
             })
             .eq('user_id', sub.user_id);
 
-        console.log(`[webhook] Marked user ${sub.user_id} as canceled due to refund`);
+        console.log(`[webhook] Marked user ${sub.user_id} as refunded due to refund/dispute`);
+        await supabaseAdmin.from("payment_audit_events").insert({
+            user_id: sub.user_id,
+            event_type: "premium_revoked_refund_or_dispute",
+            source: "stripe_webhook",
+            severity: "warning",
+            details: {
+                charge_id: charge.id,
+                customer_id: charge.customer,
+                payment_intent_id: charge.payment_intent,
+                amount_refunded: charge.amount_refunded,
+                refunded: charge.refunded,
+            },
+        });
     }
 }
 

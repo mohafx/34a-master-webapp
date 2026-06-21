@@ -85,6 +85,7 @@ serve(async (req) => {
 
         let isPremium = (subscriptionStatus === "active" || subscriptionStatus === "trialing") ||
             (session.mode === "payment" && session.payment_status === "paid");
+        let entitlement: Record<string, unknown> | null = null;
 
         if (isSuccess) {
             const result = await finalizePaidCheckoutSession({
@@ -95,6 +96,7 @@ serve(async (req) => {
                 source: "verify_checkout",
             });
             isPremium = result.isPremium;
+            entitlement = result.entitlement ?? null;
         }
 
         const response = {
@@ -110,6 +112,7 @@ serve(async (req) => {
             isGuest,
             email,
             plan,
+            entitlement,
         };
 
         console.log("[verify-checkout] Result:", response);

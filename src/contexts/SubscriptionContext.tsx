@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { toast } from './ToastContext';
@@ -11,11 +11,16 @@ import {
   TRANSITION_GRANT_SOURCE,
   isTransitionGrantActive,
 } from '../utils/transitionAccess';
+import {
+  clearPendingPaymentSession,
+  getRecentPendingPaymentSession,
+  rememberPendingPaymentSession,
+} from '../utils/paymentRecovery';
 
 export interface Subscription {
   id: string;
   user_id: string;
-  status: 'free' | 'active' | 'canceled' | 'past_due' | 'trialing';
+  status: 'free' | 'active' | 'canceled' | 'past_due' | 'trialing' | 'refunded';
   plan: 'free' | 'monthly' | '6months';
   provider: 'stripe' | 'apple' | 'google';
   current_period_start?: string | null;
@@ -25,6 +30,17 @@ export interface Subscription {
 }
 
 type PremiumSource = 'stripe' | 'transition' | 'dev' | 'test' | null;
+
+export interface PremiumEntitlementStatus {
+  isPremium: boolean;
+  source: 'stripe' | 'transition' | null;
+  plan: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  subscription: Subscription | null;
+  transitionGrant: AccessGrant | null;
+  diagnostics?: Record<string, unknown>;
+}
 
 interface CheckoutOptions {
   tiktokPlanPayload?: unknown;
@@ -38,7 +54,7 @@ interface SubscriptionContextType {
   premiumSource: PremiumSource;
   hasActiveTransitionGrant: boolean;
   loading: boolean;
-  refreshSubscription: () => Promise<void>;
+  refreshSubscription: () => Promise<PremiumEntitlementStatus | null>;
   restorePurchases: () => Promise<void>;
   manageSubscription: () => Promise<void>;
   openCheckout: (plan: '6months', options?: CheckoutOptions) => Promise<string | null>;
@@ -90,6 +106,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [transitionGrant, setTransitionGrant] = useState<AccessGrant | null>(null);
   const [loading, setLoading] = useState(true);
+  const selfHealAttemptedRef = useRef<string | null>(null);
 
   // ===== ENTITLEMENT LOGIC =====
   const isTestMode = window.location.search.includes('testsprite=true') || localStorage.getItem('testsprite_mode') === 'true';
@@ -107,7 +124,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
           ? 'test'
           : null;
 
-  const fetchSubscription = async () => {
+  const fetchSubscription = async (): Promise<PremiumEntitlementStatus | null> => {
     if (isOverrideActive) {
       if (overrideState === 'premium' && user) {
         setSubscription({
@@ -124,58 +141,91 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       }
       setTransitionGrant(user ? createDevTransitionGrant(user.id, transitionState) : null);
       setLoading(false);
-      return;
+      return null;
     }
 
     if (!user) {
       setSubscription(null);
       setTransitionGrant(null);
       setLoading(false);
-      return;
+      return null;
     }
 
     try {
-      const { data, error } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
+      const { data, error } = await supabase.functions.invoke<{ entitlement: PremiumEntitlementStatus }>('entitlement-status');
 
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching subscription:', error);
+      if (error) {
+        throw error;
       }
 
-      setSubscription(data || null);
+      const entitlement = data?.entitlement ?? null;
+      setSubscription(entitlement?.subscription || null);
+      setTransitionGrant(entitlement?.transitionGrant || null);
 
-      const { data: grantData, error: grantError } = await supabase
-        .from('access_grants')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('source', TRANSITION_GRANT_SOURCE)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (grantError && grantError.code !== 'PGRST116') {
-        console.warn('Transition access grant could not be loaded:', grantError);
+      if (entitlement?.isPremium) {
+        clearPendingPaymentSession();
       }
 
-      setTransitionGrant((grantData as AccessGrant | null) || null);
+      return entitlement;
     } catch (err) {
       console.error('Error fetching subscription:', err);
+      try {
+        const { data: subscriptions, error: subscriptionError } = await supabase
+          .from('subscriptions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('current_period_end', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (subscriptionError) throw subscriptionError;
+
+        const fallbackSubscription = ((subscriptions || []) as Subscription[])
+          .find((candidate) => hasPremiumAccess(candidate, false)) || null;
+
+        const { data: grantData, error: grantError } = await supabase
+          .from('access_grants')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('source', TRANSITION_GRANT_SOURCE)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (grantError && grantError.code !== 'PGRST116') throw grantError;
+
+        const fallbackGrant = (grantData as AccessGrant | null) || null;
+        setSubscription(fallbackSubscription);
+        setTransitionGrant(fallbackGrant);
+
+        return {
+          isPremium: Boolean(fallbackSubscription) || isTransitionGrantActive(fallbackGrant),
+          source: fallbackSubscription ? 'stripe' : isTransitionGrantActive(fallbackGrant) ? 'transition' : null,
+          plan: fallbackSubscription?.plan || (isTransitionGrantActive(fallbackGrant) ? 'transition' : null),
+          periodStart: fallbackSubscription?.current_period_start || fallbackSubscription?.created_at || fallbackGrant?.starts_at || null,
+          periodEnd: fallbackSubscription?.current_period_end || fallbackGrant?.ends_at || null,
+          subscription: fallbackSubscription,
+          transitionGrant: fallbackGrant,
+          diagnostics: { reason: 'client_fallback_after_entitlement_status_error' },
+        };
+      } catch (fallbackErr) {
+        console.error('Fallback subscription fetch failed:', fallbackErr);
+        setSubscription(null);
+        setTransitionGrant(null);
+      }
+      return null;
     } finally {
       setLoading(false);
     }
   };
 
-  const refreshSubscription = async () => {
+  const refreshSubscription = async (): Promise<PremiumEntitlementStatus | null> => {
     if (isOverrideActive) {
-      await fetchSubscription();
-      return;
+      return await fetchSubscription();
     }
 
     setLoading(true);
-    await fetchSubscription();
+    return await fetchSubscription();
   };
 
   const manageSubscription = async () => {
@@ -253,7 +303,8 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       }
 
       console.log(`[RESTORE-TRACE] ${traceId} - Sync result:`, data);
-      await fetchSubscription();
+      const entitlement = await fetchSubscription();
+      if (entitlement?.isPremium) clearPendingPaymentSession();
 
       // Always show feedback to user
       if (data && data.restored) {
@@ -406,6 +457,43 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     fetchSubscription();
   }, [user, isOverrideActive, overrideState, transitionState]);
 
+  useEffect(() => {
+    if (isOverrideActive || !user || loading || isPremium) return;
+
+    const pendingSessionId = getRecentPendingPaymentSession();
+    if (!pendingSessionId || selfHealAttemptedRef.current === pendingSessionId) return;
+
+    selfHealAttemptedRef.current = pendingSessionId;
+
+    (async () => {
+      console.log('[PAY-TRACE] Pending payment self-heal started', { sessionId: pendingSessionId });
+      setLoading(true);
+      try {
+        const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-checkout', {
+          body: { sessionId: pendingSessionId },
+        });
+        if (verifyError) throw verifyError;
+
+        if (verifyData?.isSuccess && verifyData?.paymentStatus === 'paid') {
+          await supabase.functions.invoke('sync-subscription');
+          const entitlement = await fetchSubscription();
+          if (entitlement?.isPremium) {
+            clearPendingPaymentSession();
+            toast.success('Dein Premium-Zugang wurde synchronisiert.', 'Premium ist aktiv');
+          } else {
+            console.warn('[PAY-TRACE] Paid session still has no premium entitlement', verifyData);
+          }
+        } else if (verifyData?.sessionStatus === 'open' || verifyData?.sessionStatus === 'expired' || verifyData?.sessionStatus === 'not_found') {
+          clearPendingPaymentSession();
+        }
+      } catch (err) {
+        console.error('[PAY-TRACE] Pending payment self-heal failed:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [user?.id, isOverrideActive, loading, isPremium]);
+
   // Listen for subscription changes in real-time
   useEffect(() => {
     if (isOverrideActive) return;
@@ -498,8 +586,10 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
               console.log('[PAY-TRACE] ✅ VERIFIED SUCCESS - payment_status is paid');
 
               // Sync subscription to DB
-              const { data: syncData } = await supabase.functions.invoke('sync-subscription');
-              await fetchSubscription();
+              if (sessionId) rememberPendingPaymentSession(sessionId);
+              await supabase.functions.invoke('sync-subscription');
+              const entitlement = await fetchSubscription();
+              if (entitlement?.isPremium) clearPendingPaymentSession();
 
               toast.success(
                 'Du hast jetzt vollen Zugang zu allen Inhalten.',

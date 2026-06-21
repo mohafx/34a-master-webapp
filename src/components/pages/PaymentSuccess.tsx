@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSubscription } from '../../contexts/SubscriptionContext';
 import { isLocalhostDev } from '../../utils/isLocalhostDev';
+import { clearPendingPaymentSession, rememberPendingPaymentSession } from '../../utils/paymentRecovery';
 
 type VerificationState = 'checking' | 'success' | 'pending' | 'failed';
 
@@ -17,6 +18,10 @@ interface VerifyCheckoutResponse {
     isGuest?: boolean;
     email?: string | null;
     plan?: string | null;
+    entitlement?: {
+        isPremium?: boolean;
+        diagnostics?: Record<string, unknown>;
+    } | null;
     error?: string;
 }
 
@@ -25,7 +30,7 @@ export default function PaymentSuccess() {
     const [searchParams] = useSearchParams();
     const sessionId = searchParams.get('session_id');
     const isDevPaymentSuccess = isLocalhostDev() && searchParams.get('dev_payment') === 'success';
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const { refreshSubscription } = useSubscription();
     const [state, setState] = useState<VerificationState>(isDevPaymentSuccess ? 'success' : sessionId ? 'checking' : 'failed');
     const [details, setDetails] = useState<VerifyCheckoutResponse | null>(
@@ -53,6 +58,19 @@ export default function PaymentSuccess() {
         let cancelled = false;
         let timeout: ReturnType<typeof setTimeout> | null = null;
 
+        async function waitForPremiumEntitlement(maxAttempts = 8) {
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                if (cancelled) return false;
+                const entitlement = await refreshSubscriptionRef.current();
+                if (entitlement?.isPremium) {
+                    clearPendingPaymentSession();
+                    return true;
+                }
+                await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * attempt, 3000)));
+            }
+            return false;
+        }
+
         async function verify(attempt = 1) {
             if (isDevPaymentSuccess) {
                 setState('success');
@@ -63,6 +81,8 @@ export default function PaymentSuccess() {
                 setState('failed');
                 return;
             }
+
+            rememberPendingPaymentSession(sessionId);
 
             const { data, error } = await supabase.functions.invoke<VerifyCheckoutResponse>('verify-checkout', {
                 body: { sessionId },
@@ -77,10 +97,15 @@ export default function PaymentSuccess() {
                 setDetails(data || null);
 
                 if (data?.isSuccess && data?.paymentStatus === 'paid') {
-                    setState('success');
+                    setState(data?.isPremium === false ? 'pending' : 'success');
                     if (user && !hasRefreshedSubscriptionRef.current) {
                         hasRefreshedSubscriptionRef.current = true;
-                        await refreshSubscriptionRef.current();
+                        const entitlementReady = await waitForPremiumEntitlement();
+                        if (!cancelled) {
+                            setState(entitlementReady ? 'success' : 'pending');
+                        }
+                    } else if (!user && authLoading) {
+                        setState('pending');
                     }
                     return;
                 }
@@ -105,9 +130,33 @@ export default function PaymentSuccess() {
             cancelled = true;
             if (timeout) clearTimeout(timeout);
         };
-    }, [isDevPaymentSuccess, sessionId, user?.id]);
+    }, [authLoading, isDevPaymentSuccess, sessionId, user?.id]);
 
-    const isGuest = details?.isGuest || details?.checkoutMode === 'guest' || (!user && state === 'success');
+    useEffect(() => {
+        if (!sessionId || authLoading || !user || state !== 'pending' || hasRefreshedSubscriptionRef.current) return;
+
+        let cancelled = false;
+        hasRefreshedSubscriptionRef.current = true;
+
+        (async () => {
+            for (let attempt = 1; attempt <= 8; attempt += 1) {
+                const entitlement = await refreshSubscriptionRef.current();
+                if (cancelled) return;
+                if (entitlement?.isPremium) {
+                    clearPendingPaymentSession();
+                    setState('success');
+                    return;
+                }
+                await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * attempt, 3000)));
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [authLoading, sessionId, state, user?.id]);
+
+    const isGuest = details?.isGuest || details?.checkoutMode === 'guest' || (!authLoading && !user && state === 'success');
     const email = details?.email;
     const activationPending = state === 'success' && details?.isPremium === false;
 
@@ -137,18 +186,26 @@ export default function PaymentSuccess() {
         pending: {
             icon: <ShieldCheck size={42} className="text-amber-500" strokeWidth={1.8} />,
             iconBg: 'bg-amber-50',
-            title: 'Zahlung wird noch bestätigt',
-            text: 'Die Zahlung wurde gestartet, aber Stripe hat sie noch nicht final bestätigt.',
-            panelTitle: 'Wir aktivieren automatisch',
-            panelText: 'Sobald Stripe die Zahlung bestätigt, wird dein Premium-Zugang freigeschaltet.',
+            title: details?.isSuccess ? 'Zahlung bestätigt' : 'Zahlung wird noch bestätigt',
+            text: details?.isSuccess
+                ? 'Deine Zahlung ist bestätigt. Wir synchronisieren gerade deinen Premium-Zugang mit deinem Konto.'
+                : 'Die Zahlung wurde gestartet, aber Stripe hat sie noch nicht final bestätigt.',
+            panelTitle: details?.isSuccess ? 'Zugang wird synchronisiert' : 'Wir aktivieren automatisch',
+            panelText: details?.isSuccess
+                ? 'Bitte melde dich nicht neu an. Falls Premium gleich nicht sichtbar ist, öffne die App erneut oder nutze im Profil „Einkäufe wiederherstellen”.'
+                : 'Sobald Stripe die Zahlung bestätigt, wird dein Premium-Zugang freigeschaltet.',
         },
         failed: {
             icon: <AlertTriangle size={42} className="text-red-500" strokeWidth={1.8} />,
             iconBg: 'bg-red-50',
-            title: 'Zahlung nicht abgeschlossen',
-            text: 'Wir konnten für diese Checkout-Session keine erfolgreiche Zahlung bestätigen.',
+            title: details?.isSuccess ? 'Zugang wird geprüft' : 'Zahlung nicht abgeschlossen',
+            text: details?.isSuccess
+                ? 'Die Zahlung ist bei Stripe bestätigt, aber der Premium-Status ist auf diesem Gerät noch nicht sichtbar.'
+                : 'Wir konnten für diese Checkout-Session keine erfolgreiche Zahlung bestätigen.',
             panelTitle: 'Kein Zugriff aktiviert',
-            panelText: 'Falls der Betrag bereits abgebucht wurde, kontaktiere bitte den Support mit deiner Zahlungs-E-Mail.',
+            panelText: details?.isSuccess
+                ? 'Öffne die App neu und nutze im Profil „Einkäufe wiederherstellen”. Falls es weiterhin nicht klappt, kontaktiere den Support mit deiner Zahlungs-E-Mail.'
+                : 'Falls der Betrag bereits abgebucht wurde, kontaktiere bitte den Support mit deiner Zahlungs-E-Mail.',
         },
     }[state];
 

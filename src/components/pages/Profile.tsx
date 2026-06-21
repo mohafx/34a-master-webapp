@@ -208,6 +208,13 @@ export default function Profile() {
                     <span>Premium freischalten</span>
                     {language === 'DE_AR' && <span className="text-xs font-normal border-l border-white/20 pl-2" dir="rtl">تفعيل بريميوم</span>}
                   </button>
+                  <button
+                    onClick={restorePurchases}
+                    className="w-full bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 font-bold py-3 rounded-xl border border-blue-200 dark:border-blue-900/60 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+                  >
+                    <Crown size={18} />
+                    <span>Einkäufe wiederherstellen</span>
+                  </button>
                 </div>
               </div>
             )}

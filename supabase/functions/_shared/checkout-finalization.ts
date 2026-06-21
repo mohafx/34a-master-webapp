@@ -1,6 +1,7 @@
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { capturePostHog, capturePostHogEvent, identifyPostHogUser } from "./posthog.ts";
+import { getPremiumEntitlementStatus, type PremiumEntitlementStatus } from "./entitlement-status.ts";
 
 export type CheckoutMode = "guest" | "authenticated";
 
@@ -11,6 +12,7 @@ export interface FinalizeCheckoutResult {
     email: string | null;
     plan: string;
     isPremium: boolean;
+    entitlement?: PremiumEntitlementStatus;
 }
 
 interface FinalizeCheckoutOptions {
@@ -24,6 +26,43 @@ interface FinalizeCheckoutOptions {
 function getStripeId(value: string | { id?: string } | null | undefined): string {
     if (!value) return "";
     return typeof value === "string" ? value : value.id || "";
+}
+
+async function recordPaymentAuditEvent(
+    supabaseAdmin: SupabaseClient,
+    {
+        checkoutSessionId,
+        userId,
+        eventType,
+        source,
+        severity = "info",
+        finalizedAt,
+        details = {},
+    }: {
+        checkoutSessionId?: string | null;
+        userId?: string | null;
+        eventType: string;
+        source: string;
+        severity?: "info" | "warning" | "error" | "critical";
+        finalizedAt?: string | null;
+        details?: Record<string, unknown>;
+    },
+): Promise<void> {
+    const { error } = await supabaseAdmin
+        .from("payment_audit_events")
+        .insert({
+            checkout_session_id: checkoutSessionId ?? null,
+            user_id: userId ?? null,
+            event_type: eventType,
+            source,
+            severity,
+            finalized_at: finalizedAt ?? null,
+            details,
+        });
+
+    if (error) {
+        console.error("[checkout-finalization] Failed to record payment audit event:", error);
+    }
 }
 
 export function getCheckoutMode(session: Stripe.Checkout.Session): CheckoutMode {
@@ -294,6 +333,20 @@ export async function finalizePaidCheckoutSession({
 
     if (!userId) {
         console.error(`[checkout-finalization] Successful session ${session.id} has no user_id`);
+        await recordPaymentAuditEvent(supabaseAdmin, {
+            checkoutSessionId: session.id,
+            userId,
+            eventType: "checkout_missing_user_id",
+            source,
+            severity: "critical",
+            details: {
+                payment_status: session.payment_status,
+                session_status: session.status,
+                mode: session.mode,
+                checkout_mode: checkoutMode,
+                email,
+            },
+        });
         return { userId, checkoutMode, isGuest, email, plan, isPremium: false };
     }
 
@@ -333,6 +386,38 @@ export async function finalizePaidCheckoutSession({
         });
     }
 
+    const entitlement = await getPremiumEntitlementStatus(supabaseAdmin, userId);
+    await recordPaymentAuditEvent(supabaseAdmin, {
+        checkoutSessionId: session.id,
+        userId,
+        eventType: entitlement.isPremium ? "checkout_finalized_premium_active" : "checkout_finalized_without_premium",
+        source,
+        severity: entitlement.isPremium ? "info" : "critical",
+        finalizedAt: new Date().toISOString(),
+        details: {
+            payment_status: session.payment_status,
+            session_status: session.status,
+            mode: session.mode,
+            checkout_mode: checkoutMode,
+            plan,
+            entitlement,
+            stripe_customer_id: getStripeId(session.customer),
+        },
+    });
+
+    if (!entitlement.isPremium) {
+        await capturePostHog("premium_entitlement_mismatch_server", userId, {
+            checkout_session_id: session.id,
+            payment_status: session.payment_status,
+            session_status: session.status,
+            plan,
+            checkout_mode: checkoutMode,
+            source,
+            entitlement_reason: entitlement.diagnostics.reason,
+            entitlement_diagnostics: entitlement.diagnostics,
+        });
+    }
+
     const shouldCapturePostHog = await claimSideEffect(supabaseAdmin, session.id, "posthog");
     if (shouldCapturePostHog) {
         await capturePaymentSucceeded(session, userId, source);
@@ -352,5 +437,5 @@ export async function finalizePaidCheckoutSession({
         }
     }
 
-    return { userId, checkoutMode, isGuest, email, plan, isPremium: true };
+    return { userId, checkoutMode, isGuest, email, plan, isPremium: entitlement.isPremium, entitlement };
 }
