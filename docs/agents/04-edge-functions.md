@@ -1,7 +1,7 @@
 ---
 title: Supabase Edge Functions
 scope: Katalog, Zweck, Secrets, Deploy
-last_verified: 2026-06-19
+last_verified: 2026-06-21
 ---
 
 # Supabase Edge Functions
@@ -16,9 +16,10 @@ Code liegt in `supabase/functions/_shared/`.
 | `create-checkout-session` | Stripe-Checkout für eingeloggte Nutzer starten | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_*` |
 | `create-guest-checkout` | Checkout für Gäste (ohne Account) | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_*` |
 | `create-portal-session` | Stripe Customer Portal (Verwaltung/Kündigung) | `STRIPE_SECRET_KEY` |
-| `verify-checkout` | Checkout nach Rückkehr verifizieren & finalisieren (`_shared/checkout-finalization.ts`) | `STRIPE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+| `verify-checkout` | Checkout nach Rückkehr verifizieren, finalisieren und `entitlement` zurückgeben (`_shared/checkout-finalization.ts`) | `STRIPE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `stripe-webhook` | Stripe-Webhook-Events verarbeiten, Zugriff finalisieren (`_shared/checkout-finalization.ts`) | `STRIPE_SECRET_KEY`, Webhook-Secret, `SUPABASE_SERVICE_ROLE_KEY` |
 | `sync-subscription` | Subscription-Status mit Stripe abgleichen | `STRIPE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+| `entitlement-status` | Autoritativen Premium-Status für eingeloggte Nutzer laden (`subscriptions` + `access_grants`) | `SUPABASE_SERVICE_ROLE_KEY` |
 | `confirm-user` | Serverseitige Nutzer-Bestätigung | `SUPABASE_SERVICE_ROLE_KEY` |
 | `transition-access` | Paywall-Zugriffs-Migration (Grants) | `SUPABASE_SERVICE_ROLE_KEY` |
 | `track-server-event` | Serverseitige PostHog-Events (z. B. `user_signed_up_server`) | `ALLOWED_ORIGIN`, PostHog-Keys |
@@ -28,7 +29,7 @@ Code liegt in `supabase/functions/_shared/`.
 | `oral-exam-entitlement` | Prüfungstickets für die mündliche Simulation laden, ohne eine Session zu starten | `SUPABASE_SERVICE_ROLE_KEY` |
 | `oral-exam-session` | Mündliche Prüfung starten: Auth + Prüfungstickets durchsetzen + ElevenLabs Signed URL holen + Session anlegen | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID_MINI`, `ELEVENLABS_AGENT_ID_FULL`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `oral-exam-evaluation` | Transkript (ElevenLabs, mit Client-Fallback) per OpenAI bewerten + Ergebnis speichern (idempotent) | `OPENAI_API_KEY`, `OPENAI_MODEL`, `ELEVENLABS_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
-| `_shared/` | Geteilter Code: `checkout-finalization.ts`, `oral-exam-entitlement.ts`, `posthog.ts` | — |
+| `_shared/` | Geteilter Code: `checkout-finalization.ts`, `entitlement-status.ts`, `oral-exam-entitlement.ts`, `posthog.ts` | — |
 
 > ⚠️ In diesem Supabase-Projekt liegt außerdem eine **fremde, verwaiste** Function
 > `elevenlabs-closer-webhook` (Umzugsfirmen-Lead-System, `closer_*`-Tabellen existieren nicht) —
@@ -40,6 +41,12 @@ Code liegt in `supabase/functions/_shared/`.
   `https://esm.sh/@supabase/supabase-js@2.45.0`.
 - Secrets über `Deno.env.get("…")` — **nie** `VITE_`-Variablen verwenden (die sind Frontend).
 - Functions mit Service-Role-Key umgehen RLS — entsprechend vorsichtig.
+- `entitlement-status`, `verify-checkout` und `sync-subscription` brauchen JWT-Verifikation.
+- `stripe-webhook` muss `verify_jwt=false` bleiben, weil Stripe mit Signaturheader und nicht mit
+  Supabase-JWT authentifiziert wird.
+- Payment-Funktionen, die Checkout finalisieren, müssen den gemeinsamen Code
+  `_shared/checkout-finalization.ts` nutzen. Premium-Status-Logik liegt in
+  `_shared/entitlement-status.ts`.
 
 ## Deploy / Lokal
 

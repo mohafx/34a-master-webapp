@@ -20,6 +20,17 @@ Das Projekt ist eine moderne **React 19 SPA** (Vite 6, Tailwind CSS 3, HashRoute
     *   **Stabilisierung (2026-06-20):** `8357acf` — Connect-basierte Tickets live, Erklärungsbilder-Rollout, Entitlement-Period-Start fixiert.
 *   **Lerninhalte & Lektionsfluss:**
     *   **Nutzerfeedback-Fix (2026-06-20):** Drei gemeldete StGB-Fragen korrigiert (`questions.correct_answer`: Wodka = C, Schlagstock/Platzwunde = B, Fahrradschloss = B,D) und die Fahrradschloss-Erklärung in Deutsch/Arabisch angepasst. Zusätzlich bleibt bei der letzten Frage einer Lektion die Erklärung sichtbar/öffnbar; die Lektion schließt erst nach Klick auf „Lektion abschließen“. Cache-Version `v3`, Migration `20260620182122` remote angewendet.
+*   **Performance & mobiler Cold-Start:**
+    *   **Paywall-Code-Splitting (2026-06-21):** `PaywallDialog` und Onboarding-`PaywallView` werden lazy geladen; Stripe/Paywall-Code wird nicht mehr durch den Dashboard-Erststart erzwungen. `App.tsx` nutzt gezielte `lucide-react`-Imports statt Namespace-Import.
+    *   **Zweistufiger DataCache (2026-06-21):** `DataCacheProvider` lädt blockierend nur Module, Fragen-Preview und Lernkarten-Preview. Das Dashboard wird danach freigegeben; vollständige Fragen/Lernkarten mit Antworten werden im Hintergrund geladen und mit `fullDataReady` markiert. Cache-Version `v4` verhindert Mischinterpretationen alter Daten. `QuestionView` startet keine Fragen aus Preview-Daten mit leeren Antworten, sondern nutzt dann die bestehende Supabase-Fallback-Abfrage.
+    *   **Verifiziert lokal (2026-06-21):** `npm run build`, `npm run test:oral-exam-entitlement`, `npm run test:oral-exam-routing` und `npm run test:transition-access` grün. Produktions-Preview auf iPhone getestet: App öffnet, Dashboard/Navigation/Fragen funktionieren.
+*   **Premium-/Payment-Stabilität:**
+    *   **Stabilitätsfix nach Kundenbeschwerde (2026-06-21):** Bezahlter Premium-Zugang wird nicht mehr primär aus einer einzelnen `subscriptions`-Zeile im Frontend abgeleitet. Neue Edge Function `entitlement-status` ist autoritative Premium-Quelle für eingeloggte Nutzer und wertet `subscriptions` sowie `access_grants` robust aus.
+    *   **Payment-Return gehärtet:** `PaymentSuccess` merkt sich die Checkout-`session_id`, verifiziert bezahlte Sessions erneut und pollt den Premium-Status, bis der Zugang sichtbar ist. Bei erfolgreicher Zahlung, aber noch nicht aktualisiertem Client-State, zeigt die App „Zahlung bestätigt” / „Zugang wird synchronisiert” statt einen falschen Zahlungsfehler.
+    *   **Self-Healing:** `SubscriptionContext` startet bei `isPremium=false` und kürzlich gesehener Checkout-Session automatisch `verify-checkout`, `sync-subscription` und einen frischen Entitlement-Fetch. Im Profil gibt es für Free-Nutzer „Einkäufe wiederherstellen”.
+    *   **Refund-/Dispute-Entzug:** Stripe-Refunds setzen `subscriptions.status='refunded'` und `current_period_end=now()`. `hasPremiumAccess()` und `entitlement-status` behandeln `refunded` immer als non-premium; echte Kündigungen bleiben nur bis Periodenende gültig.
+    *   **Audit & Monitoring-Basis:** Neue Tabelle `payment_audit_events` protokolliert erfolgreiche Finalisierungen, kritische Mismatches (`checkout_finalized_without_premium`), fehlende User-Zuordnung und Refund-Entzug. Supabase-Migration und Edge Functions (`entitlement-status`, `verify-checkout`, `stripe-webhook`) wurden am 2026-06-21 produktiv deployed und remote verifiziert.
+    *   **Regressionstests:** `npm run test:premium-entitlement` ergänzt Tests für Entitlement-Auswahl, Refund-Entzug, gekündigte Perioden und Pending-Payment-Recovery. Zusätzlich waren `npm run test:oral-exam-entitlement`, `npm run test:transition-access`, `npm run test:oral-exam-routing` und `npm run build` grün.
 
 ---
 
@@ -53,6 +64,11 @@ Folgende Arbeitspakete sind für die kommenden Sprints geplant:
 ### Task 5b: UI-Optimierungen nach Launch
 *   **Ziel:** Conversion und Abschlussquote der mündlichen Prüfung verbessern.
 *   **Umsetzung:** Ticketkarte, Start-Dialog, Ergebnis-Statusblock, Verlauf und Paywall nach echten Nutzungsdaten iterieren.
+
+### Task 5c: Mobiler Cold-Start und Startpfad-Performance ✅
+*   **Ziel:** Den ersten sichtbaren App-Content auf mobilen Geräten früher anzeigen, ohne Premium-, Paywall-, Stripe- oder Entitlement-Logik zu verändern.
+*   **Erledigt (2026-06-21):** DataCache auf zweistufigen Start umgestellt: Preview-Daten entsperren Dashboard/Listen früh, vollständige Antworten und Lernkarten werden im Hintergrund geladen. Quiz-Start ist gegen leere Preview-Antworten abgesichert. Paywall/Stripe bleiben unverändert und lazy geladen.
+*   **Nächster Messschritt:** Nach Deployment Lighthouse/WebPageTest auf der echten Domain gegen den vorherigen Stand vergleichen, besonders First Contentful Paint, Largest Contentful Paint und mobile Total Blocking Time.
 
 ### Task 6: Bewertungssystem (Reviews) aufbauen
 *   **Ziel:** Social Proof durch Nutzerbewertungen generieren und direktes Feedback sammeln.

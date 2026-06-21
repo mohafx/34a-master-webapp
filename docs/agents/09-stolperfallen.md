@@ -1,7 +1,7 @@
 ---
 title: Stolperfallen (Gotchas)
 scope: Bekannte Fallen, die teure Fehler verursachen
-last_verified: 2026-06-20
+last_verified: 2026-06-21
 ---
 
 # Stolperfallen (immer überfliegen)
@@ -34,6 +34,16 @@ Routing läuft über `HashRouter`; dadurch stehen auch Supabase-Auth-Tokens im H
 `stripe-webhook` und `verify-checkout` nutzen beide `_shared/checkout-finalization.ts` und die
 Tabelle `processed_checkout_sessions` gegen Doppelverarbeitung. Beim Anpassen der Bezahl-Flows die
 Idempotenz erhalten (siehe [05-payments-stripe.md](05-payments-stripe.md)).
+
+## 5b. Premium-Status nie aus einer einzelnen Subscription-Zeile ableiten
+`subscriptions` ist keine verlässliche `.single()`-Quelle für Premium. Schema-Drift, alte Zeilen,
+Refunds oder künftige Provider können mehrere oder widersprüchliche Zustände erzeugen. Die
+autoritative Quelle ist `entitlement-status` (`_shared/entitlement-status.ts`). Frontend-Fallbacks
+müssen mehrere Zeilen sortieren und `refunded`/`free` explizit ausschließen.
+
+Nach bezahlter Checkout-Rückkehr muss der Client den Status erneut laden/pollen. Eine erfolgreiche
+Stripe-Zahlung ohne frischen Frontend-State war bereits echte Fehlerursache: Nutzer zahlte, DB war
+aktiv, UI blieb Free.
 
 ## 6. Migrationen nur in `supabase/migrations/`
 `database/` speichert keine aktiven Migrationen mehr ([`database/README.md`](../../database/README.md)).
