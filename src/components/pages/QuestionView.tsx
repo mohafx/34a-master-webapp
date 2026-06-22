@@ -18,6 +18,7 @@ import { Button } from '../ui/Button';
 import { GuestProgressPopup } from '../ui/GuestProgressPopup';
 import { AuthDialog } from '../auth/AuthDialog';
 import { isAdminEmail } from '../../utils/userRoles';
+import { openWhatsAppSupport } from '../../utils/whatsappSupport';
 import {
   compareQuestions,
   getLessonQuestionProgress,
@@ -152,6 +153,8 @@ export default function QuestionView() {
   const [showGuestPopup, setShowGuestPopup] = useState(false);
   const [currentSessionCorrectCount, setCurrentSessionCorrectCount] = useState(0);
   const [showAuthDialog, setShowAuthDialog] = useState(false);
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [accessDeniedQuestionId, setAccessDeniedQuestionId] = useState<string | null>(null);
 
   // Scroll to top when exam finishes
   useEffect(() => {
@@ -217,6 +220,7 @@ export default function QuestionView() {
     setMiniExamTimeLeft(miniExamTimeLimit);
     setMiniExamStarted(true); // Start immediately for mini-exam
     setReviewingQuestion(null);
+    setAccessDeniedQuestionId(null);
 
     // Track quiz started
     if (mode || moduleId) {
@@ -380,13 +384,34 @@ export default function QuestionView() {
             }
           } else {
             // Standard flow: load module context
+            const cachedQuestion = moduleId
+              ? getQuestionsByModule(moduleId).find(q => q.id === singleId)
+              : null;
+
+            if (
+              cachedQuestion &&
+              !isQuestionAccessible(cachedQuestion) &&
+              (!Array.isArray(cachedQuestion.answers) || cachedQuestion.answers.length === 0)
+            ) {
+              setAccessDeniedQuestionId(singleId);
+              setQueue([]);
+              return;
+            }
+
             const { data: qData, error: qErr } = await supabase
               .from('questions')
               .select('module_id')
               .eq('id', singleId)
               .single();
 
-            if (qErr) throw qErr;
+            if (qErr) {
+              if (qErr.code === 'PGRST116') {
+                setAccessDeniedQuestionId(singleId);
+                setQueue([]);
+                return;
+              }
+              throw qErr;
+            }
 
             // Now load all questions for this module (will be sorted by lesson order + question order later)
             query = query.eq('module_id', qData.module_id);
@@ -603,6 +628,13 @@ export default function QuestionView() {
     ...rawQuestion,
     ...(localQuestionOverrides[rawQuestion.id] || {})
   } : rawQuestion;
+  const cachedSingleQuestion = useMemo(() => {
+    if (!singleId || !moduleId) return null;
+    return getQuestionsByModule(moduleId).find(q => q.id === singleId) || null;
+  }, [singleId, moduleId, getQuestionsByModule]);
+  const blockedSingleQuestion = accessDeniedQuestionId === singleId && cachedSingleQuestion
+    ? cachedSingleQuestion
+    : null;
   const correctAnswerCount = currentQuestion?.answers.filter(answer => answer.isCorrect).length || 0;
   const selectionLimit = Math.max(correctAnswerCount, 1);
   const isActualMultipleChoice = selectionLimit > 1;
@@ -624,6 +656,7 @@ export default function QuestionView() {
   useEffect(() => {
     if (currentQuestion) {
       setQualityResult(null);
+      setShowReportDialog(false);
     }
   }, [currentQuestion?.id]);
 
@@ -656,6 +689,21 @@ export default function QuestionView() {
     } finally {
       setQualityChecking(false);
     }
+  };
+
+  const handleReportQuestion = () => {
+    if (!currentQuestion) return;
+
+    openWhatsAppSupport({
+      topic: 'Frage melden',
+      message: 'Diese Frage, der Inhalt oder das Erklärbild ist falsch oder unvollständig.',
+      context: {
+        'Frage-ID': currentQuestion.id,
+        'Frage': currentQuestion.textDE,
+        'Modul': moduleTitle?.de || searchParams.get('moduleName') || currentQuestion.moduleId,
+      },
+    });
+    setShowReportDialog(false);
   };
 
   // ======== ARABIC TRANSLATION ========
@@ -1071,6 +1119,46 @@ export default function QuestionView() {
       executeNextStep();
     }
   };
+
+  if (blockedSingleQuestion && !isQuestionAccessible(blockedSingleQuestion)) {
+    return (
+      <div className="min-h-screen bg-[#F2F4F6] dark:bg-slate-950 px-4 py-8 flex items-center justify-center">
+        <Card className="w-full max-w-xl border-amber-200 dark:border-amber-900/40 bg-white dark:bg-slate-900" padding="lg">
+          <div className="w-14 h-14 rounded-2xl bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-5">
+            <Lock size={28} />
+          </div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-amber-600 dark:text-amber-400 mb-2">
+            Premium-Frage
+          </p>
+          <h1 className="text-xl font-black text-slate-900 dark:text-white leading-tight mb-3">
+            Diese Frage ist gesperrt
+          </h1>
+          <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300 mb-4">
+            {blockedSingleQuestion.textDE}
+          </p>
+          <p className="text-sm leading-relaxed text-slate-500 dark:text-slate-400 mb-6">
+            Antworten und Erklärung werden erst mit Premium-Zugang geladen.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button
+              variant="primary"
+              onClick={() => openPaywall('Premium Fragen')}
+              leftIcon={<Crown size={18} />}
+            >
+              Premium freischalten
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => moduleId ? navigate(`/practice/${moduleId}`) : navigate('/practice')}
+              leftIcon={<ArrowLeft size={18} />}
+            >
+              Zurück
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   if (examFinished && isLessonMode && moduleId && lessonId) {
     const lessonProgress = getLessonQuestionProgress(lessonId, queue, progress);
@@ -2069,7 +2157,7 @@ export default function QuestionView() {
                     </button>
                   </div>
 
-                  {/* Bookmark + Admin Reviewed */}
+                  {/* Report + Bookmark + Admin Reviewed */}
                   <div className="min-w-[60px] sm:min-w-[80px] flex justify-end items-center gap-1">
                     {/* Admin: Reviewed Checkbox */}
                     {isAdmin && currentQuestion && (
@@ -2096,19 +2184,30 @@ export default function QuestionView() {
                         }
                       </button>
                     )}
-                    {mode !== 'module-test' && (
-                      <button
-                        onClick={() => {
-                          if (!user?.isLoggedIn) navigate('/profile');
-                          else toggleBookmark(currentQuestion.id);
-                        }}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isBookmarked
-                          ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
-                          : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500'
-                          }`}
-                      >
-                        <Bookmark size={20} fill={isBookmarked ? "currentColor" : "none"} />
-                      </button>
+                    {mode !== 'module-test' && currentQuestion && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setShowReportDialog(true)}
+                          className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 dark:text-slate-500 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
+                          title="Problem melden"
+                          aria-label="Problem bei dieser Frage melden"
+                        >
+                          <AlertCircle size={20} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (!user?.isLoggedIn) navigate('/profile');
+                            else toggleBookmark(currentQuestion.id);
+                          }}
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isBookmarked
+                            ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
+                            : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 dark:text-slate-500'
+                            }`}
+                        >
+                          <Bookmark size={20} fill={isBookmarked ? "currentColor" : "none"} />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -2120,6 +2219,53 @@ export default function QuestionView() {
               <QuizSettingsDialog
                 onClose={() => setShowSettingsDialog(false)}
               />
+            )}
+
+            {showReportDialog && currentQuestion && (
+              <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 dark:bg-black/70 p-4 backdrop-blur-sm">
+                <div
+                  className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="report-question-title"
+                >
+                  <div className="p-5">
+                    <div className="w-11 h-11 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 flex items-center justify-center mb-4">
+                      <AlertCircle size={24} />
+                    </div>
+                    <h3 id="report-question-title" className="text-lg font-black text-slate-900 dark:text-white">
+                      Problem melden
+                    </h3>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                      Ist diese Frage, der Inhalt oder das Erklärbild falsch oder unvollständig? Wir öffnen WhatsApp mit den Fragedaten, damit du es schnell melden kannst.
+                    </p>
+                    <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-800/70 p-3">
+                      <p className="text-xs font-bold text-slate-400 dark:text-slate-500 mb-1">
+                        Frage
+                      </p>
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 line-clamp-3">
+                        {currentQuestion.textDE}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/50 p-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowReportDialog(false)}
+                      className="h-11 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      Abbrechen
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleReportQuestion}
+                      className="h-11 rounded-xl bg-green-500 text-sm font-bold text-white hover:bg-green-600 transition-colors shadow-sm"
+                    >
+                      Per WhatsApp melden
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Question Card */}

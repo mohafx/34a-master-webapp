@@ -50,7 +50,7 @@ export function DataCacheProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   // localStorage cache keys
-  const CACHE_SCHEMA_VERSION = 'v4';
+  const CACHE_SCHEMA_VERSION = 'v5';
   const CACHE_KEY_MODULES = `34a_cache_${CACHE_SCHEMA_VERSION}_modules`;
   const CACHE_KEY_QUESTIONS = `34a_cache_${CACHE_SCHEMA_VERSION}_questions`;
   const CACHE_KEY_FLASHCARDS = `34a_cache_${CACHE_SCHEMA_VERSION}_flashcards`;

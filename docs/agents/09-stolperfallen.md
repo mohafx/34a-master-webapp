@@ -1,7 +1,7 @@
 ---
 title: Stolperfallen (Gotchas)
 scope: Bekannte Fallen, die teure Fehler verursachen
-last_verified: 2026-06-21
+last_verified: 2026-06-22
 ---
 
 # Stolperfallen (immer überfliegen)
@@ -49,6 +49,31 @@ aktiv, UI blieb Free.
 `database/` speichert keine aktiven Migrationen mehr ([`database/README.md`](../../database/README.md)).
 Neue Schemaänderungen ausschließlich als Migration in `supabase/migrations/` anlegen; vorher
 `list_tables` (Supabase-MCP) lesen.
+
+## 6b. Public-Data-API-Grants nie implizit lassen
+Der Supabase-`anon`-Key ist öffentlich. Sicherheit entsteht daher ausschließlich über explizite
+Grants und RLS. Neue `public`-Tabellen/Funktionen dürfen nicht automatisch für `anon` oder
+`authenticated` erreichbar sein; Migration `20260622000944_lock_down_public_content_rls.sql` revoked
+die Default-Privileges für Browser-Rollen. Falls eine alte Baseline-Policy nicht in den sichtbaren
+Migrationen steht, muss sie explizit über `pg_policies` entfernt werden
+(`20260622001323_remove_legacy_public_content_policies.sql`).
+
+Bei neuen Inhalts- oder Pipeline-Tabellen immer im selben Migrationsfile festlegen:
+
+- `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`
+- konkrete `GRANT SELECT` nur für benötigte Browser-Lesewege
+- keine Browser-`INSERT`/`UPDATE`/`DELETE`-Rechte, außer es gibt eine enge RLS-Policy
+- operative Tabellen standardmäßig `service_role`-only
+
+Vorsicht bei Views: Postgres-Views können RLS umgehen. Keine Views mit Antwortschlüsseln,
+Erklärungen oder internem Pipeline-Status an `anon`/`authenticated` grant-en.
+
+Nach RLS-Lockdowns auch den Browser-Cache prüfen: `DataCacheProvider` speichert Fragen/Lernkarten im
+LocalStorage. Wenn vorher vollständige Inhalte im Cache landen konnten, muss die Cache-Version erhöht
+werden, sonst sehen Bestandsnutzer alte Daten bis zum Cache-Ablauf weiter.
+
+Die kostenlose Mini-Prüfung darf nicht direkt aus `written_exam_questions` lesen, weil diese Tabelle
+Premium-/Admin-gated ist. Für Gäste nutzt sie Practice-Fragen aus `questions` mit `question:`-IDs.
 
 ## 7. Kein generischer `npm test`
 Es gibt nur gezielte `npm run test:*`-Befehle. Für alles andere `npx vitest`

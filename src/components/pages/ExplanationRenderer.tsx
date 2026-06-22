@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useDevPanel } from "../../devpanel/DevPanelContext";
 import { generateQuestionImage } from "../../services/questionImages";
 import { useAuth } from "../../contexts/AuthContext";
@@ -279,9 +279,29 @@ export function ExplanationRenderer({ text, textAR, language = "DE", imageUrl, i
   const [genState, setGenState] = useState<"idle" | "loading" | "error">("idle");
   const [genError, setGenError] = useState<string | null>(null);
   const [existingImageDeleted, setExistingImageDeleted] = useState(false);
+  const [generationSeconds, setGenerationSeconds] = useState(0);
 
   const effectiveUrl = generatedUrl || (existingImageDeleted ? undefined : imageUrl);
   const effectiveAlt = generatedAlt || (existingImageDeleted ? undefined : imageAlt);
+  const generationSecondsText = generationSeconds.toLocaleString("de-DE", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+
+  useEffect(() => {
+    if (genState !== "loading") {
+      setGenerationSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    setGenerationSeconds(0);
+    const intervalId = window.setInterval(() => {
+      setGenerationSeconds(Math.min(180, (Date.now() - startedAt) / 1000));
+    }, 200);
+
+    return () => window.clearInterval(intervalId);
+  }, [genState]);
 
   const handleGenerate = async (action: "generate" | "regenerate" = "generate") => {
     if (!questionId || genState === "loading") return;
@@ -377,7 +397,10 @@ export function ExplanationRenderer({ text, textAR, language = "DE", imageUrl, i
             {genState === "loading" ? (
               <div className="flex flex-col items-center gap-3 py-2">
                 <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                  Erklärbild wird erstellt … (ca. 30–60 Sek.)
+                  Erklärbild wird erstellt …{" "}
+                  <span className="inline-block min-w-[5.5rem] text-right font-black tabular-nums text-blue-600 dark:text-blue-400">
+                    {generationSecondsText} / 180 Sek.
+                  </span>
                 </p>
                 <div className="w-full max-w-xs h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                   <div className="h-full w-1/3 rounded-full bg-blue-500 animate-[qimg-loading_1.4s_ease-in-out_infinite]" />

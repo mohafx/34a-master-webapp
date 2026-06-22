@@ -120,11 +120,13 @@ export async function generateMiniExamQuestions(): Promise<string[]> {
     const allQuestionIds: string[] = [];
     const TOTAL_QUESTIONS = 16;
 
-    // First, collect all questions by topic
+    // The free mini exam must not require direct access to written_exam_questions.
+    // It uses eligible practice questions from the public/free question pool and
+    // stores them with the `question:` prefix expected by getWrittenExamQuestionsByIds.
     const questionsByTopic: Record<string, WrittenExamQuestion[]> = {};
 
     for (const [topic] of Object.entries(MINI_EXAM_TOPIC_DISTRIBUTION)) {
-        const questions = await db.getWrittenExamQuestionsByTopic(topic, 1000);
+        const questions = await db.getPracticeQuestionsForWrittenExamTopic(topic, getModuleTitleForExamTopic(topic), 1000);
         // Shuffle questions for randomness
         questionsByTopic[topic] = questions.sort(() => Math.random() - 0.5);
     }
@@ -133,7 +135,16 @@ export async function generateMiniExamQuestions(): Promise<string[]> {
     for (const [topic, count] of Object.entries(MINI_EXAM_TOPIC_DISTRIBUTION)) {
         const available = questionsByTopic[topic] || [];
         const selected = available.slice(0, count);
-        allQuestionIds.push(...selected.map(q => q.id));
+        allQuestionIds.push(...selected.map(q => `question:${q.id}`));
+    }
+
+    if (allQuestionIds.length < TOTAL_QUESTIONS) {
+        const selectedIds = new Set(allQuestionIds);
+        const fallbackIds = shuffle(Object.values(questionsByTopic).flat())
+            .map(q => `question:${q.id}`)
+            .filter(id => !selectedIds.has(id));
+
+        allQuestionIds.push(...fallbackIds.slice(0, TOTAL_QUESTIONS - allQuestionIds.length));
     }
 
     if (allQuestionIds.length !== TOTAL_QUESTIONS) {

@@ -1,7 +1,7 @@
 ---
 title: Datenmodell
 scope: Supabase-Tabellen, types.ts, Preview-Views, RLS
-last_verified: 2026-06-21
+last_verified: 2026-06-22
 ---
 
 # Datenmodell
@@ -36,9 +36,35 @@ Aus `src/services/database.ts` (`supabase.from('…')`) referenziert:
 | `oral_exam_sessions` | Mündliche Prüfungssimulation: Sessions, Transkript, KI-Bewertung (inkl. `summary`/`answer_evaluations` im `feedback`-JSON) & `audio_path` (RLS: nur eigene Zeilen). Audio im privaten Storage-Bucket `oral-exam-audio` (RLS: nur eigener Ordner). Details: [../produkt/ki-muendliche-pruefungssimulation-funktionsweise.md](../produkt/ki-muendliche-pruefungssimulation-funktionsweise.md) |
 | `waitlist` | Warteliste / Lead-Capture |
 
-> Die `_preview`-Tabellen/Views liefern öffentlich sichtbare Inhalte (Free-Tier); die vollständigen
-> `questions`/`flashcards` sind über RLS bzw. Premium-Logik geschützt. Vor Annahmen über
-> Sichtbarkeit immer die zugehörige Migration prüfen.
+> Die `_preview`-Tabellen/Views liefern öffentlich sichtbare Vorschau-Inhalte ohne Antwortschlüssel.
+> Die vollständigen `questions`/`flashcards` sind per RLS auf `is_free = true`, aktive Premium-
+> Entitlements oder Admin-Zugriff begrenzt. `written_exam_questions` ist für Browser-Clients nur mit
+> Premium-/Admin-Entitlement lesbar. Vor Annahmen über Sichtbarkeit immer die zugehörige Migration
+> prüfen.
+
+### RLS-/Grant-Regeln für Inhaltsdaten
+
+Migrationen `20260622000944_lock_down_public_content_rls.sql` und
+`20260622001323_remove_legacy_public_content_policies.sql` schließen die vorher zu breite Data-API-
+Oberfläche. Die zweite Migration entfernt zusätzlich ältere permissive Baseline-Policies, die nicht
+mehr vollständig in der sichtbaren Migrationshistorie repräsentiert waren:
+
+- Browser-Rollen (`anon`, `authenticated`) haben keine `INSERT`-/`UPDATE`-/`DELETE`-Rechte auf
+  `questions`, `flashcards`, `lessons` oder `written_exam_questions`.
+- `questions` und `flashcards` sind öffentlich nur für `is_free = true` vollständig lesbar; Premium-
+  Inhalte brauchen ein aktives `subscriptions`-Entitlement oder einen aktiven `access_grants`-
+  Übergangsgrant.
+- `written_exam_questions` ist nicht anonym lesbar; authentifizierte Nutzer brauchen Premium/Admin.
+- `lessons` bleibt vorerst öffentlich lesbar, weil die App noch kein `lessons_preview` nutzt. Writes
+  sind trotzdem für Browser-Rollen gesperrt.
+- Operative Pipeline-Tabellen (`question_explanation_*`, `written_exam_regen_*`,
+  `lesson_image_*`) sind service-role-only.
+- Der alte View `question_catalog_public` ist für `anon`/`authenticated` revoked, weil er
+  Antwortschlüssel enthielt.
+- Nach dem RLS-Lockdown wurde `DataCacheProvider` auf Cache-Version `v5` erhöht, damit alte
+  LocalStorage-Vollinhalt-Caches (`v4`) nicht weiterverwendet werden.
+- Die kostenlose Mini-Prüfung nutzt Practice-Fragen aus `questions` mit `question:`-IDs. Sie darf
+  für Gäste nicht direkt aus `written_exam_questions` lesen.
 
 ### Prüfungstickets für mündliche Simulation
 
