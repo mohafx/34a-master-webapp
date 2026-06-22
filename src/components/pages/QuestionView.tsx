@@ -1291,6 +1291,7 @@ export default function QuestionView() {
                             text={result.question.explanationDE}
                             imageUrl={result.question.explanationImageUrl}
                             imageAlt={result.question.explanationImageAltDE}
+                            questionId={result.question.id}
                           />
                           {language === 'DE_AR' && result.question.explanationAR && (
                             <div className="mt-2 pt-2 border-t border-blue-200 dark:border-blue-800">
@@ -2261,6 +2262,7 @@ export default function QuestionView() {
                           language={language}
                           imageUrl={currentQuestion.explanationImageUrl}
                           imageAlt={currentQuestion.explanationImageAltDE}
+                          questionId={currentQuestion.id}
                         />
 
                         {/* Link to Lesson - Only if lessonId is available */}

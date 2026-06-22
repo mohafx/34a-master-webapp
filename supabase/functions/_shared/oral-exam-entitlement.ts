@@ -10,6 +10,7 @@ export interface OralExamEntitlement {
     mode: OralExamMode;
     used: number;
     limit: number;
+    bonusTickets: number;
     remaining: number;
     windowStartsAt: string | null;
     windowEndsAt: string | null;
@@ -69,6 +70,32 @@ async function countOralExamSessions(
     return count ?? 0;
 }
 
+async function getActiveBonusTickets(
+    supabaseAdmin: SupabaseClient,
+    userId: string,
+    mode: OralExamMode,
+): Promise<number> {
+    const { data, error } = await supabaseAdmin
+        .from("oral_exam_ticket_grants")
+        .select("bonus_tickets, starts_at, ends_at")
+        .eq("user_id", userId)
+        .eq("mode", mode)
+        .eq("status", "active");
+
+    if (error) {
+        throw new Error(`Zusätzliche Prüfungstickets konnten nicht geladen werden: ${error.message}`);
+    }
+
+    const now = new Date();
+    return (data ?? []).reduce((sum, grant) => {
+        const startsAt = grant.starts_at ? new Date(grant.starts_at) : null;
+        const endsAt = grant.ends_at ? new Date(grant.ends_at) : null;
+        if (startsAt && startsAt > now) return sum;
+        if (endsAt && endsAt <= now) return sum;
+        return sum + Math.max(0, Number(grant.bonus_tickets ?? 0));
+    }, 0);
+}
+
 export async function getOralExamEntitlement(
     supabaseAdmin: SupabaseClient,
     userId: string,
@@ -88,6 +115,7 @@ export async function getOralExamEntitlement(
     if (subscriptionGrantsPremium(sub)) {
         const windowStartsAt = sub.current_period_start ?? sub.created_at ?? null;
         const windowEndsAt = sub.current_period_end ?? null;
+        const bonusTickets = await getActiveBonusTickets(supabaseAdmin, userId, "full_simulation");
         const used = await countOralExamSessions(
             supabaseAdmin,
             userId,
@@ -95,12 +123,14 @@ export async function getOralExamEntitlement(
             windowStartsAt,
             windowEndsAt,
         );
+        const limit = ORAL_EXAM_PREMIUM_LIMIT + bonusTickets;
         return {
             isPremium: true,
             mode: "full_simulation",
             used,
-            limit: ORAL_EXAM_PREMIUM_LIMIT,
-            remaining: Math.max(ORAL_EXAM_PREMIUM_LIMIT - used, 0),
+            limit,
+            bonusTickets,
+            remaining: Math.max(limit - used, 0),
             windowStartsAt,
             windowEndsAt,
         };
@@ -121,6 +151,7 @@ export async function getOralExamEntitlement(
     if (grantIsActive(grant)) {
         const windowStartsAt = grant.starts_at ?? null;
         const windowEndsAt = grant.ends_at ?? null;
+        const bonusTickets = await getActiveBonusTickets(supabaseAdmin, userId, "full_simulation");
         const used = await countOralExamSessions(
             supabaseAdmin,
             userId,
@@ -128,24 +159,29 @@ export async function getOralExamEntitlement(
             windowStartsAt,
             windowEndsAt,
         );
+        const limit = ORAL_EXAM_PREMIUM_LIMIT + bonusTickets;
         return {
             isPremium: true,
             mode: "full_simulation",
             used,
-            limit: ORAL_EXAM_PREMIUM_LIMIT,
-            remaining: Math.max(ORAL_EXAM_PREMIUM_LIMIT - used, 0),
+            limit,
+            bonusTickets,
+            remaining: Math.max(limit - used, 0),
             windowStartsAt,
             windowEndsAt,
         };
     }
 
+    const bonusTickets = await getActiveBonusTickets(supabaseAdmin, userId, "free_test_3q");
     const used = await countOralExamSessions(supabaseAdmin, userId, "free_test_3q");
+    const limit = ORAL_EXAM_FREE_LIMIT + bonusTickets;
     return {
         isPremium: false,
         mode: "free_test_3q",
         used,
-        limit: ORAL_EXAM_FREE_LIMIT,
-        remaining: Math.max(ORAL_EXAM_FREE_LIMIT - used, 0),
+        limit,
+        bonusTickets,
+        remaining: Math.max(limit - used, 0),
         windowStartsAt: null,
         windowEndsAt: null,
     };

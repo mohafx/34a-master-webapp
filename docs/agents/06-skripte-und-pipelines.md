@@ -28,9 +28,13 @@ Weitere Helfer (ohne npm-Alias): `scripts/admin_configure_free_tier.ts`,
 
 ## Quiz-Erklärungsgrafiken
 
-Für Erklärungsgrafiken zu einzelnen Quizfragen gibt es eine lokale Batch-Pipeline mit Review-Gate.
-Sie nutzt die OpenAI Image API (`gpt-image-2` per Default), nicht die ChatGPT-App. `OPENAI_API_KEY`
-darf nur lokal/serverseitig stehen und nie als `VITE_`-Variable ins Frontend gelangen.
+Für Erklärungsgrafiken zu einzelnen Quizfragen gibt es zwei Wege:
+
+- Self-Service im UI über die Edge Function `generate-question-image` (aktueller Primärweg).
+- Lokale Batch-Pipeline mit Review-Gate über `npm run pilot:question-images`.
+
+Beide nutzen die OpenAI Image API (`gpt-image-2` per Default), nicht die ChatGPT-App.
+`OPENAI_API_KEY` darf nur lokal/serverseitig stehen und nie als `VITE_`-Variable ins Frontend gelangen.
 
 1. Frage und gespeicherte Explanation aus Supabase lesen.
 2. Bild-Brief, Prompt, `manifest.json` und `review.md` erzeugen.
@@ -40,7 +44,7 @@ darf nur lokal/serverseitig stehen und nie als `VITE_`-Variable ins Frontend gel
 6. Commit-Stage erzeugt eine Migration mit `question_explanation_image_url`, Alt-Text und Prompt-Notiz.
 7. `supabase db push --dry-run` und danach `supabase db push` bleiben bewusst separate Schritte.
 
-Status, Prompt-Template und Namenskonventionen stehen in
+Status, Prompt-Template, aktuelle Referenzbilder und Namenskonventionen stehen in
 [`../produkt/quiz-erklaerungsbilder-rollout.md`](../produkt/quiz-erklaerungsbilder-rollout.md).
 
 ## Ausführung

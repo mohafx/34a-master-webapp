@@ -79,10 +79,16 @@ Rollout der Infografiken ergänzt:
 | `question_explanation_image_url` | Öffentliche Asset-URL, die oberhalb der Erklärung gerendert wird |
 | `question_explanation_image_alt_de` | Deutscher Alt-Text für Barrierefreiheit und Kontext |
 | `question_explanation_image_prompt` | Prompt-/Quellnotiz zur Nachvollziehbarkeit der Bildgenerierung |
+| `question_explanation_image_status` | Reservefeld für Status/Lock-Migration des Self-Service-Flows |
+| `question_explanation_image_locked_at` | Reservefeld für Status/Lock-Migration des Self-Service-Flows |
 
 Die App mappt diese Felder auf `Question.explanationImageUrl` und `Question.explanationImageAltDE`.
-Die Anzeige passiert zentral in `src/components/pages/ExplanationRenderer.tsx`. Aktuelle Projekt-Doku
-und Status: [`../produkt/quiz-erklaerungsbilder-rollout.md`](../produkt/quiz-erklaerungsbilder-rollout.md).
+Die Anzeige, Self-Service-Erstellung und Admin-Aktionen passieren zentral in
+`src/components/pages/ExplanationRenderer.tsx` über `src/services/questionImages.ts` und die Edge
+Function `generate-question-image`. Bilder werden im öffentlichen Supabase-Storage-Bucket
+`question-explanations` gespeichert; Referenzbilder liegen unter `_references/`, generierte Bilder
+unter `<question-id>.png`. Aktuelle Projekt-Doku und Status:
+[`../produkt/quiz-erklaerungsbilder-rollout.md`](../produkt/quiz-erklaerungsbilder-rollout.md).
 
 ## Typen (`src/types.ts`)
 

@@ -4,12 +4,13 @@ import {
   pickPremiumSubscription,
 } from '../supabase/functions/_shared/oral-exam-entitlement';
 
-type TableName = 'subscriptions' | 'access_grants' | 'oral_exam_sessions';
+type TableName = 'subscriptions' | 'access_grants' | 'oral_exam_sessions' | 'oral_exam_ticket_grants';
 
 interface MockDb {
   subscriptions: any[];
   access_grants: any[];
   oral_exam_sessions: any[];
+  oral_exam_ticket_grants: any[];
 }
 
 class MockQuery {
@@ -118,6 +119,7 @@ describe('oral exam entitlement', () => {
         },
       ],
       access_grants: [],
+      oral_exam_ticket_grants: [],
       oral_exam_sessions: [
         { user_id: userId, mode: 'free_test_3q', created_at: '2026-06-10T00:00:00.000Z', connected_at: '2026-06-10T00:01:00.000Z' },
         { user_id: userId, mode: 'full_simulation', created_at: '2026-06-12T00:00:00.000Z', connected_at: '2026-06-12T00:01:00.000Z' },
@@ -146,6 +148,7 @@ describe('oral exam entitlement', () => {
         },
       ],
       access_grants: [],
+      oral_exam_ticket_grants: [],
       oral_exam_sessions: [
         { user_id: userId, mode: 'free_test_3q', created_at: '2026-06-12T00:00:00.000Z', connected_at: '2026-06-12T00:01:00.000Z' },
       ],
@@ -164,6 +167,7 @@ describe('oral exam entitlement', () => {
     const db: MockDb = {
       subscriptions: [],
       access_grants: [],
+      oral_exam_ticket_grants: [],
       oral_exam_sessions: [
         { user_id: userId, mode: 'free_test_3q', status: 'pending', created_at: '2026-06-12T00:00:00.000Z', connected_at: null },
       ],
@@ -189,6 +193,7 @@ describe('oral exam entitlement', () => {
           created_at: '2026-06-01T00:00:00.000Z',
         },
       ],
+      oral_exam_ticket_grants: [],
       oral_exam_sessions: [
         { user_id: userId, mode: 'full_simulation', created_at: '2026-05-31T23:59:59.000Z', connected_at: '2026-05-31T23:59:59.000Z' },
         { user_id: userId, mode: 'full_simulation', created_at: '2026-06-02T00:00:00.000Z', connected_at: '2026-06-02T00:01:00.000Z' },
@@ -201,6 +206,54 @@ describe('oral exam entitlement', () => {
     expect(entitlement.mode).toBe('full_simulation');
     expect(entitlement.used).toBe(1);
     expect(entitlement.remaining).toBe(9);
+  });
+
+  it('adds active bonus ticket grants to the premium limit', async () => {
+    const userId = 'user-premium-bonus';
+    const db: MockDb = {
+      subscriptions: [
+        {
+          user_id: userId,
+          status: 'active',
+          current_period_start: '2026-06-01T00:00:00.000Z',
+          current_period_end: '2026-07-01T00:00:00.000Z',
+          created_at: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+      access_grants: [],
+      oral_exam_ticket_grants: [
+        {
+          user_id: userId,
+          mode: 'full_simulation',
+          status: 'active',
+          bonus_tickets: 15,
+          starts_at: '2026-06-01T00:00:00.000Z',
+          ends_at: '2099-01-01T00:00:00.000Z',
+        },
+        {
+          user_id: userId,
+          mode: 'full_simulation',
+          status: 'revoked',
+          bonus_tickets: 99,
+          starts_at: '2026-06-01T00:00:00.000Z',
+          ends_at: '2099-01-01T00:00:00.000Z',
+        },
+      ],
+      oral_exam_sessions: Array.from({ length: 10 }, (_, index) => ({
+        user_id: userId,
+        mode: 'full_simulation',
+        created_at: `2026-06-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+        connected_at: `2026-06-${String(index + 1).padStart(2, '0')}T00:01:00.000Z`,
+      })),
+    };
+
+    const entitlement = await getOralExamEntitlement(createClient(db), userId);
+
+    expect(entitlement.isPremium).toBe(true);
+    expect(entitlement.used).toBe(10);
+    expect(entitlement.bonusTickets).toBe(15);
+    expect(entitlement.limit).toBe(25);
+    expect(entitlement.remaining).toBe(15);
   });
 
   it('prefers valid premium rows over invalid rows', () => {

@@ -25,6 +25,7 @@ Code liegt in `supabase/functions/_shared/`.
 | `track-server-event` | Serverseitige PostHog-Events (z. B. `user_signed_up_server`) | `ALLOWED_ORIGIN`, PostHog-Keys |
 | `ai-proxy` | Proxy zu Google AI (Schutz des API-Keys) | `GOOGLE_AI_API_KEY` |
 | `question-explanation-pipeline` | Erklärungen zu Fragen generieren | `GOOGLE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
+| `generate-question-image` | Quiz-Erklärbild per UI erzeugen, cachen und Admin-Löschen/-Regenerieren erlauben | `OPENAI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` |
 | `written-exam-regeneration-pipeline` | Schriftliche-Prüfung-Fragen regenerieren | `GOOGLE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
 | `oral-exam-entitlement` | Prüfungstickets für die mündliche Simulation laden, ohne eine Session zu starten | `SUPABASE_SERVICE_ROLE_KEY` |
 | `oral-exam-session` | Mündliche Prüfung starten: Auth + Prüfungstickets durchsetzen + ElevenLabs Signed URL holen + Session anlegen | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID_MINI`, `ELEVENLABS_AGENT_ID_FULL`, `SUPABASE_SERVICE_ROLE_KEY` |

@@ -36,6 +36,7 @@ Für Ad-hoc-Läufe direkt: `npx vitest run <pfad>` oder `npx vitest` (Watch).
 | `oralExamRouting.test.ts` | Auswahl Mini-/Full-ElevenLabs-Agent |
 | `oralExamScenarios.test.ts` | Vollständigkeit und Grundvalidierung des kuratierten Szenario-Pools |
 | `question-explanation-pipeline.validation.test.ts` | Erklärungs-Pipeline-Validierung |
+| `question-explanation-images.test.ts` | Erklärbild-Prompt-/Batch-Helfer |
 | `written-exam-regeneration.validation.test.ts` | Schriftliche-Prüfung-Regen (Validierung) |
 | `written-exam-regeneration.integration.test.ts` | Schriftliche-Prüfung-Regen (Integration) |
 | `lernplanGenerator.test.ts` | Lernplan-Generierung |

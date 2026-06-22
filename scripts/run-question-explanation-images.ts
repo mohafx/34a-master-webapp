@@ -41,13 +41,15 @@ interface Args {
 }
 
 const DEFAULT_MODEL = "gpt-image-2";
-const DEFAULT_SIZE = "1536x864";
+const DEFAULT_SIZE = "1024x1024";
 const DEFAULT_QUALITY = "medium";
 const DEFAULT_OUTPUT_ROOT = "local_archive/question_explanation_images";
 const DEFAULT_OPENAI_TIMEOUT_MS = 180_000;
 const DEFAULT_REFERENCE_IMAGE_PATHS = [
-  "public/question-explanations/öffentliches-recht-privatrecht.png",
-  "public/question-explanations/private-sicherheit-befugnisse.png",
+  "public/question-explanations/185563F2-94F9-4EB0-A1CF-97DD8EAC5CF6.PNG",
+  "public/question-explanations/C6438977-F0F0-4A8E-8D05-4B60409DBF73.PNG",
+  "public/question-explanations/E574E446-36EC-4DBA-9DC2-DA3469C02259.PNG",
+  "public/question-explanations/F28B7702-F43D-4152-8498-463ADD7DC86C.PNG",
 ];
 
 function parseArgs(): Args {

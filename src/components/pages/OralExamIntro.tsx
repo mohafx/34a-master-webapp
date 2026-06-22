@@ -82,7 +82,7 @@ export default function OralExamIntro() {
         if (entitlement && entitlement.remaining <= 0) {
             setShowPrepDialog(false);
             if (entitlement.isPremium) {
-                setError('Du hast deine 10 Prüfungstickets für diesen Abo-Zeitraum bereits genutzt.');
+                setError(`Du hast deine ${entitlement.limit} Prüfungstickets für diesen Abo-Zeitraum bereits genutzt.`);
             } else {
                 openPaywall('Mündliche Prüfung');
             }
@@ -119,7 +119,7 @@ export default function OralExamIntro() {
                 openPaywall('Mündliche Prüfung');
             } else if (err instanceof OralExamTicketLimitError) {
                 if (err.entitlement) setEntitlement(err.entitlement);
-                setError('Du hast deine 10 Prüfungstickets für diesen Abo-Zeitraum bereits genutzt.');
+                setError(`Du hast deine ${err.entitlement?.limit ?? entitlement?.limit ?? 10} Prüfungstickets für diesen Abo-Zeitraum bereits genutzt.`);
             } else {
                 setError(err instanceof Error ? err.message : 'Unbekannter Fehler.');
             }

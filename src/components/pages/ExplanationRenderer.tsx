@@ -1,5 +1,8 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useDevPanel } from "../../devpanel/DevPanelContext";
+import { generateQuestionImage } from "../../services/questionImages";
+import { useAuth } from "../../contexts/AuthContext";
+import { isAdminEmail } from "../../utils/userRoles";
 
 interface ExplanationRendererProps {
   text: string;
@@ -7,6 +10,7 @@ interface ExplanationRendererProps {
   language?: string;
   imageUrl?: string;
   imageAlt?: string;
+  questionId?: string;
 }
 
 interface ParsedSection {
@@ -262,9 +266,65 @@ function renderContent(content: string, dir: "ltr" | "rtl" = "ltr") {
   );
 }
 
-export function ExplanationRenderer({ text, textAR, language = "DE", imageUrl, imageAlt }: ExplanationRendererProps) {
+export function ExplanationRenderer({ text, textAR, language = "DE", imageUrl, imageAlt, questionId }: ExplanationRendererProps) {
   const { showExplanationImages } = useDevPanel();
+  const { user } = useAuth();
+  const isAdmin = isAdminEmail(user?.email);
   const isArabicEnabled = language === "DE_AR" && !!textAR;
+
+  // Self-service image generation: a question's explanation image is generated
+  // exactly once (by the first user who requests it) and then cached for all.
+  const [generatedUrl, setGeneratedUrl] = useState<string | undefined>(undefined);
+  const [generatedAlt, setGeneratedAlt] = useState<string | undefined>(undefined);
+  const [genState, setGenState] = useState<"idle" | "loading" | "error">("idle");
+  const [genError, setGenError] = useState<string | null>(null);
+  const [existingImageDeleted, setExistingImageDeleted] = useState(false);
+
+  const effectiveUrl = generatedUrl || (existingImageDeleted ? undefined : imageUrl);
+  const effectiveAlt = generatedAlt || (existingImageDeleted ? undefined : imageAlt);
+
+  const handleGenerate = async (action: "generate" | "regenerate" = "generate") => {
+    if (!questionId || genState === "loading") return;
+    setGenState("loading");
+    setGenError(null);
+    try {
+      // The backend may report 'pending' if another user is generating the same
+      // image right now; poll until it is ready.
+      const started = Date.now();
+      let result = await generateQuestionImage(questionId, action);
+      while (result.status === "pending" && Date.now() - started < 120_000) {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        result = await generateQuestionImage(questionId);
+      }
+      if (result.status === "ready" && result.url) {
+        setGeneratedUrl(action === "regenerate" ? `${result.url}?v=${Date.now()}` : result.url);
+        setGeneratedAlt(result.altText || undefined);
+        setExistingImageDeleted(false);
+        setGenState("idle");
+      } else {
+        throw new Error("Zeitüberschreitung – bitte später erneut versuchen.");
+      }
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : "Bildgenerierung fehlgeschlagen.");
+      setGenState("error");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!questionId || genState === "loading") return;
+    setGenState("loading");
+    setGenError(null);
+    try {
+      await generateQuestionImage(questionId, "delete");
+      setGeneratedUrl(undefined);
+      setGeneratedAlt(undefined);
+      setExistingImageDeleted(true);
+      setGenState("idle");
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : "Bild konnte nicht gelöscht werden.");
+      setGenState("error");
+    }
+  };
 
   const sectionsDE = useMemo(() => parseSections(text), [text]);
   const sectionsAR = useMemo(() => {
@@ -279,14 +339,68 @@ export function ExplanationRenderer({ text, textAR, language = "DE", imageUrl, i
   return (
     <div className="flex flex-col gap-4">
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden min-h-[100px]">
-        {imageUrl && showExplanationImages && (
-          <div className="p-3 sm:p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900">
+        {effectiveUrl && showExplanationImages && (
+          <div>
             <img
-              src={imageUrl}
-              alt={imageAlt || "Infografik zur Erklärung"}
+              src={effectiveUrl}
+              alt={effectiveAlt || "Infografik zur Erklärung"}
               loading="lazy"
-              className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white shadow-sm"
+              className="w-full block"
             />
+            {isAdmin && questionId && (
+              <div className="flex flex-wrap items-center justify-center gap-2 p-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/70">
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={genState === "loading"}
+                  className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/60 dark:bg-slate-950 dark:text-red-400"
+                >
+                  Bild löschen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleGenerate("regenerate")}
+                  disabled={genState === "loading"}
+                  className="inline-flex items-center justify-center rounded-lg bg-blue-500 px-3 py-2 text-xs font-bold text-white hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {genState === "loading" ? "Regeneriert …" : "Bild regenerieren"}
+                </button>
+                {genState === "error" && genError && (
+                  <p className="basis-full text-center text-xs text-red-500">{genError}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {!effectiveUrl && showExplanationImages && questionId && (
+          <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40">
+            {genState === "loading" ? (
+              <div className="flex flex-col items-center gap-3 py-2">
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                  Erklärbild wird erstellt … (ca. 30–60 Sek.)
+                </p>
+                <div className="w-full max-w-xs h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                  <div className="h-full w-1/3 rounded-full bg-blue-500 animate-[qimg-loading_1.4s_ease-in-out_infinite]" />
+                </div>
+                <style>{`@keyframes qimg-loading{0%{transform:translateX(-120%)}100%{transform:translateX(420%)}}`}</style>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2 py-1 text-center">
+                <button
+                  type="button"
+                  onClick={() => handleGenerate()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold px-4 py-2.5 transition-colors shadow-sm"
+                >
+                  <span aria-hidden>📷</span> Erklärbild erstellen
+                </button>
+                <p className="text-xs text-slate-400 dark:text-slate-500">
+                  Erstellt eine Infografik zu dieser Erklärung.
+                </p>
+                {genState === "error" && genError && (
+                  <p className="text-xs text-red-500">{genError}</p>
+                )}
+              </div>
+            )}
           </div>
         )}
         {sectionsDE.length === 0 ? (

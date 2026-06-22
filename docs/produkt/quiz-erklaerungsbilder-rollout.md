@@ -1,7 +1,7 @@
 ---
 title: Quiz-Erklärungsgrafiken Rollout
-status: in Arbeit
-last_updated: 2026-06-18
+status: Self-Service live im Test
+last_updated: 2026-06-22
 owner: Content / Produkt
 ---
 
@@ -15,16 +15,18 @@ oberhalb des Erklärungstextes angezeigt.
 
 ## Aktueller Status
 
-Modul 1 „Öffentliche Sicherheit und Ordnung“: **51 Quizfragen**, davon **3 mit Erklärungsgrafik**
-und **48 offen**. Die ersten drei Grafiken sind freigegeben, im Repo gespeichert und per Supabase
-Migration verknüpft.
+Die ursprünglichen fest verknüpften Erklärungsgrafiken wurden zurückgesetzt. Quiz-Erklärbilder werden
+jetzt per Self-Service im UI erzeugt: Bei Fragen ohne Bild erscheint „Erklärbild erstellen“. Die
+erste erfolgreiche Generierung speichert genau ein PNG in Supabase Storage und verknüpft die URL in
+`public.questions`; danach sehen alle Nutzer dieses Bild und der Erstellen-Button verschwindet.
 
-| Reihenfolge | Frage-ID | Thema | Asset | Status |
-|-------------|----------|-------|-------|--------|
-| 1 | `a2396f6a-ae9e-42c0-bb5f-21790c40a73d` | Schutzgüter der Öffentlichen Sicherheit | `/question-explanations/öffentliche-sicherheit-schutzgüter.png` | freigegeben, gespeichert, in DB verknüpft |
-| 2 | `61105670-c58d-4002-bd95-0754045201cc` | Befugnisse privater Sicherheitsmitarbeiter | `/question-explanations/private-sicherheit-befugnisse.png` | freigegeben, gespeichert, in DB verknüpft |
-| 3 | `039f7735-96c5-4cb3-9c72-52beec7381a5` | Öffentliches Recht vs. Privatrecht | `/question-explanations/öffentliches-recht-privatrecht.png` | freigegeben, gespeichert, in DB verknüpft |
-| 4+ | offen | weitere Quizfragen in UI-Reihenfolge | offen | noch zu generieren |
+Admin-Konten (`m.almajzoub1@gmail.com`) sehen bei vorhandenen Bildern zusätzlich:
+
+- `Bild löschen` — entfernt Storage-Objekt und DB-Verknüpfung.
+- `Bild regenerieren` — löscht das vorhandene Bild und erzeugt sofort ein neues.
+
+Serverseitig erzwingt die Edge Function `generate-question-image`, dass normale Nutzer vorhandene
+Bilder nicht neu generieren können. Admin-Aktionen werden per Supabase-JWT und Admin-Mail geprüft.
 
 ## Automatisierter Batchlauf Modul 1
 
@@ -71,16 +73,25 @@ supabase db push
 npm run build
 ```
 
-Lokale Env-Variablen:
+Aktuelle Image-API-Settings:
 
 | Variable | Standard | Zweck |
 |----------|----------|-------|
 | `OPENAI_API_KEY` | erforderlich für echte Bildgenerierung | OpenAI API-Key, nur lokal/serverseitig, nie mit `VITE_` |
 | `QUESTION_IMAGE_MODEL` | `gpt-image-2` | GPT-Image-Modell |
-| `QUESTION_IMAGE_SIZE` | `1536x864` | 16:9-Ausgabe, beide Kanten Vielfache von 16 |
+| `QUESTION_IMAGE_SIZE` | `1024x1024` | quadratische mobile-first Ausgabe |
 | `QUESTION_IMAGE_QUALITY` | `medium` | Bildqualität |
 | `QUESTION_IMAGE_TIMEOUT_MS` | `180000` | Timeout pro OpenAI-Aufruf |
 | `QUESTION_IMAGE_BRIEF_MODEL` | leer | Optionales Textmodell für JSON-Briefs; leer nutzt lokale Heuristik |
+
+Die Edge Function nutzt `/v1/images/edits`, sobald Referenzbilder abrufbar sind; Fallback ohne
+Referenzen wäre `/v1/images/generations` mit `n=1`. Aktuell sind vier Referenzbilder in
+`public/question-explanations/` und remote unter `question-explanations/_references/` aktiv:
+
+- `185563F2-94F9-4EB0-A1CF-97DD8EAC5CF6.PNG`
+- `C6438977-F0F0-4A8E-8D05-4B60409DBF73.PNG`
+- `E574E446-36EC-4DBA-9DC2-DA3469C02259.PNG`
+- `F28B7702-F43D-4152-8498-463ADD7DC86C.PNG`
 
 ## Technische Umsetzung
 
@@ -91,40 +102,39 @@ Neue optionale Spalten in `public.questions`:
 | `question_explanation_image_url` | Öffentliche URL zum Bild |
 | `question_explanation_image_alt_de` | Deutscher Alt-Text |
 | `question_explanation_image_prompt` | Prompt-/Quellnotiz |
+| `question_explanation_image_status` | Reservefeld für Status/Lock-Migration |
+| `question_explanation_image_locked_at` | Reservefeld für Status/Lock-Migration |
 
 Frontend-Mapping:
 
 - `src/types.ts`: `Question.explanationImageUrl`, `Question.explanationImageAltDE`
 - `src/contexts/DataCacheContext.tsx`: Mapping aus Supabase-Daten und Cache-Version
 - `src/components/pages/QuestionView.tsx`: Übergabe an `ExplanationRenderer`
-- `src/components/pages/ExplanationRenderer.tsx`: Rendering des optionalen Bildes oberhalb des Textes
+- `src/components/pages/ExplanationRenderer.tsx`: Rendering des Bildes, Self-Service-Button und Admin-Aktionen
+- `src/services/questionImages.ts`: Aufruf von `generate-question-image`
+- `supabase/functions/generate-question-image/`: serverseitige Generierung, Cache, Admin-Delete und Admin-Regenerate
 
-Assets liegen im Repo unter:
+Referenzbilder liegen im Repo unter:
 
 ```text
 public/question-explanations/
 ```
 
-Die URL in Supabase ist relativ, z. B.:
+Generierte Nutzerbilder liegen im Supabase Storage Bucket:
 
 ```text
-/question-explanations/private-sicherheit-befugnisse.png
+question-explanations/<question-id>.png
 ```
 
 ## Workflow pro Frage
 
-1. Nächste Frage in UI-Reihenfolge bestimmen.
-2. Frage, Antwortoptionen und `explanation_de` read-only aus Supabase laden.
-3. Bild-Brief und Prompt erzeugen.
-4. Grafik mit OpenAI `gpt-image-2` generieren.
-5. Nutzer prüft das Bild im Review-Ordner.
-6. Nur bei Freigabe: PNG unter `public/question-explanations/` speichern.
-7. Migration anlegen, die nur freigegebene Fragen aktualisiert.
-8. `supabase db push` ausführen.
-9. Read-only prüfen:
-   - DB-Felder sind gesetzt.
-   - lokale Asset-URL liefert `200 OK`.
-10. `npm run build` ausführen.
+1. Nutzer beantwortet eine Frage und sieht die Erklärung.
+2. Wenn kein Bild verknüpft ist, zeigt `ExplanationRenderer` den Button `Erklärbild erstellen`.
+3. `generate-question-image` lädt Frage, Erklärung und Referenzbilder.
+4. Die Function erzeugt ein Bild per OpenAI Image API und lädt es nach Supabase Storage.
+5. Die Function setzt `question_explanation_image_url`, Alt-Text und Prompt-Notiz in `questions`.
+6. Weitere Nutzer erhalten das gespeicherte Bild; neue Generierung ist blockiert.
+7. Admins können das Bild löschen oder regenerieren.
 
 ## Bildstil
 
@@ -132,8 +142,11 @@ Die Grafiken sollen zur bestehenden App passen:
 
 - heller App-Look, keine dunklen Hintergründe
 - weiße Cards mit großen Rundungen und weichen Schatten
-- kräftiges Blau wie `#3B82F6` / `#2563EB`
+- primäres Blau exakt `#4E81EE` für Header, Badges, Pfeile und Highlights
+- feste Farben: Grün `#10B981`, Orange `#F59E0B`, Haupttext `#0F172A`, Sekundärtext `#475569`, Hintergrund `#F8FAFC`
 - Slate-Typografie, klare Hierarchie, große lesbare Texte
+- mobile-first: lieber optionale Bereiche wie „Merksatz“, „Wichtig“ oder „Praxis-Tipp“ weglassen, statt Text zu verkleinern oder zu quetschen
+- Schrift nicht strecken, stauchen, verzerren oder künstlich kondensieren
 - einfache App-Icons/Kacheln statt komplexer Poster
 - wenig Text, keine langen Rechtserklärungen im Bild
 - deutsche Umlaute korrekt schreiben: `ä`, `ö`, `ü`, `ß`
@@ -156,10 +169,16 @@ Primary request:
 Create an app-style explanation illustration for the quiz topic "<THEMA>". The image must explain the concept behind the stored explanation, not reveal answer letters or simply mark the correct choices.
 
 Style:
-Match a bright modern German learning app UI. Background #F0F4F8, main white card with very large rounded corners (24-32px), soft shadow, bold slate typography #0F172A, primary blue #3B82F6 / #2563EB, pale blue icon backgrounds, subtle emerald accents only when they help understanding. Lots of whitespace, large readable German text, clean rounded icon tiles. It should look like a native 34a Master app card, not a corporate infographic.
+Match the attached reference images, but override all blue accents with exactly #4E81EE. Use a
+bright mobile-first German learning-app UI: background #F8FAFC, white rounded cards, soft shadow,
+fixed rounded modern sans-serif typography, main text #0F172A, secondary text #475569, positive
+accents #10B981 and small warning/tip accents #F59E0B. Do not stretch, squeeze, warp, skew or
+condense text. If space is tight, remove optional sections such as Merksatz, Wichtig or Praxis-Tipp.
 
 Composition:
-16:9 horizontal card. Use a strong blue rounded header band with a short German title. Below it, use 2-6 rounded UI tiles or a simple split layout that explains the concept visually. Use modern lucide-style line icons. Keep the layout mobile-readable.
+Square 1:1 card. Use a #4E81EE rounded header band with a short German title. Prefer header plus
+at most two main content cards. Add at most one optional bottom note only if all text remains large
+and mobile-readable.
 
 Text constraints:
 Use only these German texts:
@@ -206,5 +225,5 @@ WHERE id = '<question-id>';
 ## Offene Punkte
 
 - Optional später eine Admin-Ansicht für fehlende Erklärungsgrafiken bauen.
-- Optional später Supabase-Trackingtabellen für Bild-Jobs ergänzen. Aktuell reicht der lokale
-  `manifest.json`-Reviewlauf, weil vor DB-Schreibzugriff manuell freigegeben wird.
+- Optional später dedizierte Supabase-Trackingtabellen für Bild-Jobs ergänzen. Aktuell nutzt die
+  Function `question_explanation_image_prompt` als einfachen Lock-/Audit-Marker.

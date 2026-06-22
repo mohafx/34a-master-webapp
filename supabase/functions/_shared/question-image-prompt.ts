@@ -1,30 +1,6 @@
-export interface LessonRow {
-  id: string;
-  order_index: number | null;
-  title_de: string | null;
-}
-
-export interface QuestionRow {
-  id: string;
-  lesson_id: string | null;
-  order_index: number | null;
-  global_order_index?: number | null;
-  text_de: string;
-  explanation_de: string | null;
-  question_explanation_image_url?: string | null;
-  correct_answer?: string | null;
-  answer_a_de?: string | null;
-  answer_b_de?: string | null;
-  answer_c_de?: string | null;
-  answer_d_de?: string | null;
-  answer_e_de?: string | null;
-  answer_f_de?: string | null;
-}
-
-export interface QuestionWithLesson extends QuestionRow {
-  lesson_order_index: number | null;
-  lesson_title_de: string | null;
-}
+// Pure, runtime-agnostic helpers for building the §34a quiz explanation image
+// prompt. Mirrors scripts/question-explanation-image-utils.ts (Node side).
+// Keep both in sync when the visual style changes.
 
 export interface QuestionImageBrief {
   title: string;
@@ -33,37 +9,10 @@ export interface QuestionImageBrief {
   slug: string;
 }
 
-export interface QuestionImageManifestEntry {
-  questionId: string;
-  moduleOrderIndex: number;
-  lessonOrderIndex: number | null;
-  lessonTitle: string | null;
-  questionOrderIndex: number | null;
-  globalOrderIndex: number | null;
-  questionText: string;
-  explanationDE: string | null;
-  title: string;
-  allowedText: string[];
-  altText: string;
-  slug: string;
-  assetFileName: string;
-  assetUrl: string;
-  prompt: string;
-  candidatePath: string | null;
-  status: "generated" | "dry_run";
-}
-
-export interface QuestionImageManifest {
-  version: 1;
-  runId: string;
-  moduleOrderIndex: number;
-  generatedAt: string;
-  model: string;
-  size: string;
-  quality: string;
-  referenceImagePaths?: string[];
-  dryRun: boolean;
-  entries: QuestionImageManifestEntry[];
+export interface QuestionForImage {
+  text_de: string;
+  explanation_de: string | null;
+  lesson_title_de?: string | null;
 }
 
 const ANSWER_LETTER_RE = /^(?:[A-Fa-f]|[A-Fa-f][).:-].*)$/;
@@ -93,41 +42,6 @@ const FALLBACK_TERMS = [
   "Art. 13 GG",
   "§ 127 StPO",
 ];
-
-export function prepareQuestionImageTargets(params: {
-  questions: QuestionRow[];
-  lessons: LessonRow[];
-  onlyMissing: boolean;
-  limit: number;
-}): QuestionWithLesson[] {
-  const lessonById = new Map(params.lessons.map((lesson) => [lesson.id, lesson]));
-  let rows = params.questions.map((question) => {
-    const lesson = question.lesson_id ? lessonById.get(question.lesson_id) : undefined;
-    return {
-      ...question,
-      lesson_order_index: lesson?.order_index ?? null,
-      lesson_title_de: lesson?.title_de ?? null,
-    };
-  });
-
-  if (params.onlyMissing) {
-    rows = rows.filter((question) => !question.question_explanation_image_url);
-  }
-
-  rows.sort((a, b) => {
-    const lessonA = a.lesson_order_index ?? Number.MAX_SAFE_INTEGER;
-    const lessonB = b.lesson_order_index ?? Number.MAX_SAFE_INTEGER;
-    if (lessonA !== lessonB) return lessonA - lessonB;
-
-    const orderA = a.global_order_index ?? a.order_index ?? Number.MAX_SAFE_INTEGER;
-    const orderB = b.global_order_index ?? b.order_index ?? Number.MAX_SAFE_INTEGER;
-    if (orderA !== orderB) return orderA - orderB;
-
-    return a.id.localeCompare(b.id);
-  });
-
-  return params.limit > 0 ? rows.slice(0, params.limit) : rows;
-}
 
 export function createGermanSlug(input: string, fallback = "quiz-erklaerung"): string {
   const slug = input
@@ -162,7 +76,7 @@ function shortLabel(value: string, maxChars: number): string {
   return clipped || value.slice(0, maxChars).trim();
 }
 
-function collectAllowedText(question: QuestionWithLesson): string[] {
+function collectAllowedText(question: QuestionForImage): string[] {
   const haystack = `${question.text_de}\n${question.explanation_de || ""}`;
   const found: string[] = [];
 
@@ -188,7 +102,7 @@ function collectAllowedText(question: QuestionWithLesson): string[] {
     .slice(0, 6);
 }
 
-function deriveTitle(question: QuestionWithLesson): string {
+function deriveTitle(question: QuestionForImage): string {
   const text = stripMarkdown(question.text_de);
   const lower = text.toLowerCase();
 
@@ -205,7 +119,7 @@ function deriveTitle(question: QuestionWithLesson): string {
   return shortLabel(text.replace(/\?$/u, ""), 46);
 }
 
-export function buildLocalQuestionImageBrief(question: QuestionWithLesson): QuestionImageBrief {
+export function buildLocalQuestionImageBrief(question: QuestionForImage): QuestionImageBrief {
   const title = deriveTitle(question);
   const allowedText = collectAllowedText(question);
   const slugSource = `${title} ${allowedText.slice(0, 2).join(" ")}`;
@@ -220,7 +134,7 @@ export function buildLocalQuestionImageBrief(question: QuestionWithLesson): Ques
   };
 }
 
-export function buildQuestionImagePrompt(question: QuestionWithLesson, brief: QuestionImageBrief): string {
+export function buildQuestionImagePrompt(question: QuestionForImage, brief: QuestionImageBrief): string {
   const suggestedTerms = [brief.title, ...brief.allowedText]
     .filter((item, index, all) => item && all.indexOf(item) === index)
     .map((item) => `- ${item}`)
@@ -278,53 +192,4 @@ export function buildQuestionImagePrompt(question: QuestionWithLesson, brief: Qu
     "Avoid:",
     "Answer letters or option markers, the phrase 'richtige Antwort', long legal paragraphs, tiny unreadable text, photorealistic people, weapons-in-use or graphic/aggressive scenes, dark full-bleed theme, watermark, logo, English words.",
   ].join("\n");
-}
-
-export function validateManifestEntry(entry: Pick<QuestionImageManifestEntry, "questionId" | "allowedText" | "assetUrl" | "assetFileName">): string[] {
-  const issues: string[] = [];
-  if (!entry.questionId) issues.push("questionId fehlt.");
-  if (!entry.assetUrl.startsWith("/question-explanations/")) {
-    issues.push(`assetUrl muss mit /question-explanations/ beginnen: ${entry.assetUrl}`);
-  }
-  if (!entry.assetFileName.endsWith(".png")) {
-    issues.push(`assetFileName muss auf .png enden: ${entry.assetFileName}`);
-  }
-  if (entry.allowedText.length === 0 || entry.allowedText.length > 6) {
-    issues.push(`allowedText muss 1 bis 6 Einträge haben: ${entry.allowedText.length}`);
-  }
-  for (const text of entry.allowedText) {
-    if (hasAnswerLetterLabel(text)) issues.push(`allowedText enthält Antwortbuchstaben: ${text}`);
-  }
-  return issues;
-}
-
-export function parseApprovedQuestionIds(raw: unknown): Set<string> {
-  if (Array.isArray(raw)) {
-    return new Set(raw.filter((item): item is string => typeof item === "string" && item.trim()).map((item) => item.trim()));
-  }
-
-  if (raw && typeof raw === "object") {
-    const record = raw as Record<string, unknown>;
-    const approved = Array.isArray(record.approved) ? record.approved : Array.isArray(record.questionIds) ? record.questionIds : [];
-    return new Set(approved.filter((item): item is string => typeof item === "string" && item.trim()).map((item) => item.trim()));
-  }
-
-  return new Set();
-}
-
-export function sqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-export function buildQuestionImageMigrationSql(entries: Pick<QuestionImageManifestEntry, "questionId" | "assetUrl" | "altText" | "prompt">[]): string {
-  return entries
-    .map((entry) => [
-      "UPDATE public.questions",
-      "SET",
-      `  question_explanation_image_url = ${sqlString(entry.assetUrl)},`,
-      `  question_explanation_image_alt_de = ${sqlString(entry.altText)},`,
-      `  question_explanation_image_prompt = ${sqlString(`Automatisierter Review-Batch: ${truncate(entry.prompt, 900)}`)}`,
-      `WHERE id = ${sqlString(entry.questionId)};`,
-    ].join("\n"))
-    .join("\n\n");
 }

@@ -54,7 +54,7 @@ export class OralExamTicketLimitError extends Error {
  * Startet eine mündliche Prüfungssimulation. Legt serverseitig eine Session an
  * und liefert die ElevenLabs Signed URL + Dynamic Variables zurück.
  * @throws OralExamPaywallError wenn Free-Kontingent (1 Gratis-Test) aufgebraucht
- * @throws OralExamTicketLimitError wenn Premium-Kontingent (10 Prüfungstickets) aufgebraucht
+ * @throws OralExamTicketLimitError wenn das Premium-Kontingent aufgebraucht ist
  */
 export async function startOralExamSession(
     focusTopic?: string | null,

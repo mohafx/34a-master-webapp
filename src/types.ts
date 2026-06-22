@@ -249,6 +249,7 @@ export interface OralExamEntitlement {
   mode: 'free_test_3q' | 'full_simulation';
   used: number;
   limit: number;
+  bonusTickets?: number;
   remaining: number;
   windowStartsAt: string | null;
   windowEndsAt: string | null;
